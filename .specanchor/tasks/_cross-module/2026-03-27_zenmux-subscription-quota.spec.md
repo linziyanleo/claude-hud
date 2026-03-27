@@ -199,8 +199,9 @@ export function renderZenmuxLine(ctx: RenderContext): string | null;
 - [x] Step 3: `src/config.ts` — `HudElement` 联合类型新增 `'zenmux'`；`DEFAULT_ELEMENT_ORDER` 在 `usage` 后追加 `zenmux`；`HudConfig.display` 新增 `showZenmuxQuota`（默认 false）和 `zenmuxCacheTtlMs`（默认 1000）；`mergeConfig` 添加验证逻辑
 - [x] Step 4: `src/render/lines/zenmux.ts` — 新建文件，实现 `renderZenmuxLine()`：
   - 格式：`ZenMux 5h: ██░░░░ 7% | 7d: ██░░░░ 6%`
-  - >90% 时使用 critical 颜色 + ⚠ 前缀告警
+  - 三级颜色：0-60% 绿色、60%-90% 黄色、90%+ 红色 + ⚠ 前缀告警
   - 账号状态异常（suspended/banned 等）时显示告警
+  - 重置时间统一分钟精度，实时倒计时
 - [x] Step 5: `src/render/lines/index.ts` — 导出 `renderZenmuxLine`
 - [x] Step 6: `src/render/index.ts` — `renderElementLine` switch 新增 `'zenmux'` case
 - [x] Step 7: `src/index.ts` — `MainDeps` 新增 `fetchZenmuxQuota`；`main()` 中按 `showZenmuxQuota` 配置调用并注入 `RenderContext`
