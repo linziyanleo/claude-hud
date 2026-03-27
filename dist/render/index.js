@@ -304,6 +304,10 @@ function renderCompact(ctx) {
     if (sessionLine) {
         lines.push(sessionLine);
     }
+    const zenmuxLine = renderZenmuxLine(ctx);
+    if (zenmuxLine) {
+        lines.push(zenmuxLine);
+    }
     return lines;
 }
 function renderExpanded(ctx) {
