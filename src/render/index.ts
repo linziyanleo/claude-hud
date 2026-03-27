@@ -11,6 +11,7 @@ import {
   renderEnvironmentLine,
   renderUsageLine,
   renderMemoryLine,
+  renderZenmuxLine,
 } from './lines/index.js';
 import { dim, RESET } from './colors.js';
 
@@ -355,6 +356,8 @@ function renderElementLine(ctx: RenderContext, element: HudElement): string | nu
       return display?.showAgents === false ? null : renderAgentsLine(ctx);
     case 'todos':
       return display?.showTodos === false ? null : renderTodosLine(ctx);
+    case 'zenmux':
+      return display?.showZenmuxQuota === false ? null : renderZenmuxLine(ctx);
   }
 }
 

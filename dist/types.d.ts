@@ -64,6 +64,18 @@ export interface MemoryInfo {
 }
 /** Check if usage limit is reached (either window at 100%) */
 export declare function isLimitReached(data: UsageData): boolean;
+export interface ZenmuxQuotaWindow {
+    usagePercentage: number;
+    resetsAt: Date | null;
+    maxFlows: number;
+    usedFlows: number;
+    remainingFlows: number;
+}
+export interface ZenmuxQuotaData {
+    fiveHour: ZenmuxQuotaWindow;
+    sevenDay: ZenmuxQuotaWindow;
+    accountStatus: string;
+}
 export interface TranscriptData {
     tools: ToolEntry[];
     agents: AgentEntry[];
@@ -82,6 +94,7 @@ export interface RenderContext {
     gitStatus: GitStatus | null;
     usageData: UsageData | null;
     memoryUsage: MemoryInfo | null;
+    zenmuxQuota: ZenmuxQuotaData | null;
     config: HudConfig;
     extraLabel: string | null;
     claudeCodeVersion?: string;

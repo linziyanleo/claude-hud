@@ -7,6 +7,7 @@ import { loadConfig } from './config.js';
 import { parseExtraCmdArg, runExtraCmd } from './extra-cmd.js';
 import { getClaudeCodeVersion } from './version.js';
 import { getMemoryUsage } from './memory.js';
+import { fetchZenmuxQuota } from './zenmux.js';
 import type { RenderContext } from './types.js';
 import { fileURLToPath } from 'node:url';
 import { realpathSync } from 'node:fs';
@@ -22,6 +23,7 @@ export type MainDeps = {
   runExtraCmd: typeof runExtraCmd;
   getClaudeCodeVersion: typeof getClaudeCodeVersion;
   getMemoryUsage: typeof getMemoryUsage;
+  fetchZenmuxQuota: typeof fetchZenmuxQuota;
   render: typeof render;
   now: () => number;
   log: (...args: unknown[]) => void;
@@ -39,6 +41,7 @@ export async function main(overrides: Partial<MainDeps> = {}): Promise<void> {
     runExtraCmd,
     getClaudeCodeVersion,
     getMemoryUsage,
+    fetchZenmuxQuota,
     render,
     now: () => Date.now(),
     log: console.log,
@@ -85,6 +88,10 @@ export async function main(overrides: Partial<MainDeps> = {}): Promise<void> {
       ? await deps.getMemoryUsage()
       : null;
 
+    const zenmuxQuota = config.display.showZenmuxQuota
+      ? await deps.fetchZenmuxQuota(config.display.zenmuxCacheTtlMs)
+      : null;
+
     const ctx: RenderContext = {
       stdin,
       transcript,
@@ -96,6 +103,7 @@ export async function main(overrides: Partial<MainDeps> = {}): Promise<void> {
       gitStatus,
       usageData,
       memoryUsage,
+      zenmuxQuota,
       config,
       extraLabel,
       claudeCodeVersion,

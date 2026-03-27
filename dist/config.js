@@ -6,6 +6,7 @@ export const DEFAULT_ELEMENT_ORDER = [
     'project',
     'context',
     'usage',
+    'zenmux',
     'memory',
     'environment',
     'tools',
@@ -41,6 +42,8 @@ export const DEFAULT_CONFIG = {
         showSessionName: false,
         showClaudeCodeVersion: false,
         showMemoryUsage: false,
+        showZenmuxQuota: false,
+        zenmuxCacheTtlMs: 1000,
         autocompactBuffer: 'enabled',
         usageThreshold: 0,
         sevenDayThreshold: 80,
@@ -224,6 +227,14 @@ export function mergeConfig(userConfig) {
         showMemoryUsage: typeof migrated.display?.showMemoryUsage === 'boolean'
             ? migrated.display.showMemoryUsage
             : DEFAULT_CONFIG.display.showMemoryUsage,
+        showZenmuxQuota: typeof migrated.display?.showZenmuxQuota === 'boolean'
+            ? migrated.display.showZenmuxQuota
+            : DEFAULT_CONFIG.display.showZenmuxQuota,
+        zenmuxCacheTtlMs: typeof migrated.display?.zenmuxCacheTtlMs === 'number'
+            && Number.isFinite(migrated.display.zenmuxCacheTtlMs)
+            && migrated.display.zenmuxCacheTtlMs >= 0
+            ? migrated.display.zenmuxCacheTtlMs
+            : DEFAULT_CONFIG.display.zenmuxCacheTtlMs,
         autocompactBuffer: validateAutocompactBuffer(migrated.display?.autocompactBuffer)
             ? migrated.display.autocompactBuffer
             : DEFAULT_CONFIG.display.autocompactBuffer,
