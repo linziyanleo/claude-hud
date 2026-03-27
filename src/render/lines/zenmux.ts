@@ -38,7 +38,7 @@ function formatQuotaWindowPart(
   const color = getQuotaColor(pct, colors);
   const percentStr = `${color}${pct}%${RESET}`;
   const bar = quotaBar(pct, barWidth, colors);
-  const reset = formatResetTime(window.resetsAt, windowLabel);
+  const reset = formatResetTime(window.resetsAt);
 
   const isAlert = pct >= 90;
 
@@ -57,24 +57,16 @@ function formatQuotaWindowPart(
   return `${windowLabel}: ${body}`;
 }
 
-function formatResetTime(resetsAt: Date | null, granularity: '5h' | '7d'): string {
+function formatResetTime(resetsAt: Date | null): string {
   if (!resetsAt) return '';
   const now = new Date();
   const diffMs = resetsAt.getTime() - now.getTime();
   if (diffMs <= 0) return '';
 
-  const totalSecs = Math.ceil(diffMs / 1000);
-  const days = Math.floor(totalSecs / 86400);
-  const hours = Math.floor((totalSecs % 86400) / 3600);
-  const mins = Math.floor((totalSecs % 3600) / 60);
-  const secs = totalSecs % 60;
-
-  if (granularity === '5h') {
-    if (days > 0) return `${days}d ${hours}h ${mins}m`;
-    if (hours > 0) return `${hours}h ${mins}m ${secs}s`;
-    if (mins > 0) return `${mins}m ${secs}s`;
-    return `${secs}s`;
-  }
+  const totalMins = Math.ceil(diffMs / 60000);
+  const days = Math.floor(totalMins / 1440);
+  const hours = Math.floor((totalMins % 1440) / 60);
+  const mins = totalMins % 60;
 
   if (days > 0) return `${days}d ${hours}h ${mins}m`;
   if (hours > 0) return `${hours}h ${mins}m`;
