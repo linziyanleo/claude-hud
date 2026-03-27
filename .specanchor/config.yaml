@@ -1,0 +1,30 @@
+specanchor:
+  version: "0.3.0"
+  project_name: "claude-hud"
+
+  paths:
+    global_specs: ".specanchor/global/"
+    module_specs: ".specanchor/modules/"
+    task_specs: ".specanchor/tasks/"
+    archive: ".specanchor/archive/"
+    module_index: ".specanchor/module-index.md"
+    project_codemap: ".specanchor/project-codemap.md"
+
+  coverage:
+    scan_paths:
+      - "src/**"
+      - "src/render/**"
+      - "src/render/lines/**"
+    ignore_paths:
+      - "src/**/*.test.*"
+      - "dist/**"
+
+  check:
+    stale_days: 14
+    outdated_days: 30
+    warn_recent_commits_days: 14
+    task_base_branch: "main"
+
+  sync:
+    auto_check_on_mr: true
+    sprint_sync_reminder: true
