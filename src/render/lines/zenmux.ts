@@ -65,11 +65,11 @@ function formatQuotaWindowPart(
   let body: string;
   if (isAlert) {
     body = reset
-      ? `${bar} ${RED}⚠ ${pct}%${RESET} (resets in ${reset})`
+      ? `${bar} ${RED}⚠ ${pct}%${RESET} (in ${reset})`
       : `${bar} ${RED}⚠ ${pct}%${RESET}`;
   } else {
     body = reset
-      ? `${bar} ${percentStr} (resets in ${reset})`
+      ? `${bar} ${percentStr} (in ${reset})`
       : `${bar} ${percentStr}`;
   }
 

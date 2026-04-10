@@ -109,13 +109,13 @@ function formatUsageWindowPart({
 
   if (usageBarEnabled) {
     const body = reset
-      ? `${quotaBar(percent ?? 0, barWidth, colors)} ${usageDisplay} (resets in ${reset})`
+      ? `${quotaBar(percent ?? 0, barWidth, colors)} ${usageDisplay} (in ${reset})`
       : `${quotaBar(percent ?? 0, barWidth, colors)} ${usageDisplay}`;
     return forceLabel ? `${label}: ${body}` : body;
   }
 
   return reset
-    ? `${label}: ${usageDisplay} (resets in ${reset})`
+    ? `${label}: ${usageDisplay} (in ${reset})`
     : `${label}: ${usageDisplay}`;
 }
 

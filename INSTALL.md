@@ -99,7 +99,7 @@ HUD 应该出现在输入框下方。
 开启后，HUD 新增一行显示 ZenMux 订阅用量：
 
 ```
-ZenMux 5h: ██░░░░░░░░ 7% (resets in 2h 30m 15s) | 7d: ██░░░░░░░░ 6% (resets in 3d 12h 45m)
+ZenMux 5h: ██░░░░░░░░ 7% (in 2h 30m 15s) | 7d: ██░░░░░░░░ 6% (in 3d 12h 45m)
 ```
 
 ### 告警
@@ -157,6 +157,7 @@ npm run build
 1. 确认 `ZENMUX_MANAGEMENT_API_KEY` 环境变量已设置
 2. 确认 `config.json` 中 `showZenmuxQuota` 为 `true`
 3. 手动测试 API 是否可用：
+
    ```bash
    curl -H "Authorization: Bearer $ZENMUX_MANAGEMENT_API_KEY" \
      https://zenmux.ai/api/v1/management/subscription/detail
