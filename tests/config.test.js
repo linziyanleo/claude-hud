@@ -41,6 +41,8 @@ test('loadConfig returns valid config structure', async () => {
   assert.equal(typeof config.gitStatus.enabled, 'boolean');
   assert.equal(typeof config.gitStatus.showDirty, 'boolean');
   assert.equal(typeof config.gitStatus.showAheadBehind, 'boolean');
+  assert.equal(typeof config.gitStatus.pushWarningThreshold, 'number');
+  assert.equal(typeof config.gitStatus.pushCriticalThreshold, 'number');
 
   // display object with expected properties
   assert.equal(typeof config.display, 'object');
@@ -58,6 +60,10 @@ test('loadConfig returns valid config structure', async () => {
   assert.equal(typeof config.display.showSessionName, 'boolean');
   assert.equal(typeof config.display.showClaudeCodeVersion, 'boolean');
   assert.equal(typeof config.display.showMemoryUsage, 'boolean');
+  assert.equal(typeof config.display.showCost, 'boolean');
+  assert.equal(typeof config.display.showOutputStyle, 'boolean');
+  assert.ok(['full', 'compact', 'short'].includes(config.display.modelFormat), 'modelFormat should be valid');
+  assert.equal(typeof config.display.modelOverride, 'string', 'modelOverride should be string');
   assert.equal(typeof config.colors, 'object');
   for (const key of ['context', 'usage', 'warning', 'usageWarning', 'critical', 'model', 'project', 'git', 'gitBranch', 'label', 'custom']) {
     const t = typeof config.colors[key];
@@ -111,11 +117,82 @@ test('mergeConfig preserves explicit showMemoryUsage=true', () => {
   assert.equal(config.display.showMemoryUsage, true);
 });
 
+test('mergeConfig defaults showCost to false', () => {
+  const config = mergeConfig({});
+  assert.equal(config.display.showCost, false);
+  assert.equal(DEFAULT_CONFIG.display.showCost, false);
+});
+
+test('mergeConfig preserves explicit showCost=true', () => {
+  const config = mergeConfig({ display: { showCost: true } });
+  assert.equal(config.display.showCost, true);
+});
+
+test('mergeConfig defaults git push thresholds to disabled', () => {
+  const config = mergeConfig({});
+  assert.equal(config.gitStatus.pushWarningThreshold, 0);
+  assert.equal(config.gitStatus.pushCriticalThreshold, 0);
+});
+
+test('mergeConfig preserves explicit git push thresholds', () => {
+  const config = mergeConfig({
+    gitStatus: { pushWarningThreshold: 15, pushCriticalThreshold: 30 },
+  });
+  assert.equal(config.gitStatus.pushWarningThreshold, 15);
+  assert.equal(config.gitStatus.pushCriticalThreshold, 30);
+});
+
+test('mergeConfig defaults showOutputStyle to false', () => {
+  const config = mergeConfig({});
+  assert.equal(config.display.showOutputStyle, false);
+  assert.equal(DEFAULT_CONFIG.display.showOutputStyle, false);
+});
+
+test('mergeConfig preserves explicit showOutputStyle=true', () => {
+  const config = mergeConfig({ display: { showOutputStyle: true } });
+  assert.equal(config.display.showOutputStyle, true);
+});
+
 test('mergeConfig preserves customLine and truncates long values', () => {
   const customLine = 'x'.repeat(120);
   const config = mergeConfig({ display: { customLine } });
   assert.equal(config.display.customLine.length, 80);
   assert.equal(config.display.customLine, customLine.slice(0, 80));
+});
+
+test('mergeConfig defaults modelFormat to full', () => {
+  const config = mergeConfig({});
+  assert.equal(config.display.modelFormat, 'full');
+});
+
+test('mergeConfig preserves valid modelFormat values', () => {
+  assert.equal(mergeConfig({ display: { modelFormat: 'compact' } }).display.modelFormat, 'compact');
+  assert.equal(mergeConfig({ display: { modelFormat: 'short' } }).display.modelFormat, 'short');
+  assert.equal(mergeConfig({ display: { modelFormat: 'full' } }).display.modelFormat, 'full');
+});
+
+test('mergeConfig falls back to full for invalid modelFormat', () => {
+  assert.equal(mergeConfig({ display: { modelFormat: 'invalid' } }).display.modelFormat, 'full');
+  assert.equal(mergeConfig({ display: { modelFormat: 123 } }).display.modelFormat, 'full');
+  assert.equal(mergeConfig({ display: { modelFormat: null } }).display.modelFormat, 'full');
+});
+
+test('mergeConfig defaults modelOverride to empty string', () => {
+  const config = mergeConfig({});
+  assert.equal(config.display.modelOverride, '');
+});
+
+test('mergeConfig preserves modelOverride and truncates long values', () => {
+  const override = 'x'.repeat(120);
+  const config = mergeConfig({ display: { modelOverride: override } });
+  assert.equal(config.display.modelOverride.length, 80);
+  assert.equal(config.display.modelOverride, override.slice(0, 80));
+});
+
+test('mergeConfig falls back to empty for non-string modelOverride', () => {
+  assert.equal(mergeConfig({ display: { modelOverride: 123 } }).display.modelOverride, '');
+  assert.equal(mergeConfig({ display: { modelOverride: null } }).display.modelOverride, '');
+  assert.equal(mergeConfig({ display: { modelOverride: true } }).display.modelOverride, '');
 });
 
 test('getConfigPath respects CLAUDE_CONFIG_DIR', async () => {

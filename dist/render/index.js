@@ -3,11 +3,13 @@ import { renderSessionLine } from './session-line.js';
 import { renderToolsLine } from './tools-line.js';
 import { renderAgentsLine } from './agents-line.js';
 import { renderTodosLine } from './todos-line.js';
-import { renderIdentityLine, renderProjectLine, renderEnvironmentLine, renderUsageLine, renderMemoryLine, renderZenmuxLine, } from './lines/index.js';
+import { renderIdentityLine, renderProjectLine, renderGitFilesLine, renderEnvironmentLine, renderUsageLine, renderMemoryLine, renderZenmuxLine, renderSessionTokensLine, } from './lines/index.js';
 import { dim, RESET } from './colors.js';
+import { UNKNOWN_TERMINAL_WIDTH } from '../utils/terminal.js';
 // eslint-disable-next-line no-control-regex
-const ANSI_ESCAPE_PATTERN = /^\x1b\[[0-9;]*m/;
-const ANSI_ESCAPE_GLOBAL = /\x1b\[[0-9;]*m/g;
+const ANSI_ESCAPE_PATTERN = /^(?:\x1b\[[0-9;]*m|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\))/;
+// eslint-disable-next-line no-control-regex
+const ANSI_ESCAPE_GLOBAL = /(?:\x1b\[[0-9;]*m|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\))/g;
 const GRAPHEME_SEGMENTER = typeof Intl.Segmenter === 'function'
     ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
     : null;
@@ -29,7 +31,7 @@ function getTerminalWidth() {
     if (Number.isFinite(envColumns) && envColumns > 0) {
         return envColumns;
     }
-    return null;
+    return UNKNOWN_TERMINAL_WIDTH;
 }
 function splitAnsiTokens(str) {
     const tokens = [];
@@ -310,7 +312,7 @@ function renderCompact(ctx) {
     }
     return lines;
 }
-function renderExpanded(ctx) {
+function renderExpanded(ctx, terminalWidth = null) {
     const elementOrder = ctx.config?.elementOrder ?? DEFAULT_ELEMENT_ORDER;
     const seen = new Set();
     const lines = [];
@@ -327,7 +329,15 @@ function renderExpanded(ctx) {
             const firstLine = renderElementLine(ctx, element);
             const secondLine = renderElementLine(ctx, nextElement);
             if (firstLine && secondLine) {
-                lines.push({ line: `${firstLine} │ ${secondLine}`, isActivity: false });
+                const combinedLine = `${firstLine} │ ${secondLine}`;
+                const canCombine = !terminalWidth || visualLength(combinedLine) <= terminalWidth;
+                if (canCombine) {
+                    lines.push({ line: combinedLine, isActivity: false });
+                }
+                else {
+                    lines.push({ line: firstLine, isActivity: false });
+                    lines.push({ line: secondLine, isActivity: false });
+                }
             }
             else if (firstLine) {
                 lines.push({ line: firstLine, isActivity: false });
@@ -347,6 +357,11 @@ function renderExpanded(ctx) {
             isActivity: ACTIVITY_ELEMENTS.has(element),
         });
     }
+    // Git files line always goes last (pass width so it can hide itself if too narrow)
+    const gitFilesLine = renderGitFilesLine(ctx, terminalWidth);
+    if (gitFilesLine) {
+        lines.push({ line: gitFilesLine, isActivity: false });
+    }
     return lines;
 }
 export function render(ctx) {
@@ -355,8 +370,15 @@ export function render(ctx) {
     const terminalWidth = getTerminalWidth();
     let lines;
     if (lineLayout === 'expanded') {
-        const renderedLines = renderExpanded(ctx);
+        const renderedLines = renderExpanded(ctx, terminalWidth);
         lines = renderedLines.map(({ line }) => line);
+        // Session token usage (cumulative)
+        if (ctx.config?.display?.showSessionTokens) {
+            const sessionTokensLine = renderSessionTokensLine(ctx);
+            if (sessionTokensLine) {
+                lines.push(sessionTokensLine);
+            }
+        }
         if (showSeparators) {
             const firstActivityIndex = renderedLines.findIndex(({ isActivity }) => isActivity);
             if (firstActivityIndex > 0) {
@@ -382,9 +404,7 @@ export function render(ctx) {
         lines.push(...activityLines);
     }
     const physicalLines = lines.flatMap(line => line.split('\n'));
-    const visibleLines = terminalWidth
-        ? physicalLines.flatMap(line => wrapLineToWidth(line, terminalWidth))
-        : physicalLines;
+    const visibleLines = physicalLines.flatMap(line => wrapLineToWidth(line, terminalWidth));
     for (const line of visibleLines) {
         const outputLine = `${RESET}${line}`;
         console.log(outputLine);

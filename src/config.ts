@@ -2,11 +2,21 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { getHudPluginDir } from './claude-config-dir.js';
+import type { Language } from './i18n/types.js';
 
 export type LineLayoutType = 'compact' | 'expanded';
 
 export type AutocompactBufferMode = 'enabled' | 'disabled';
 export type ContextValueMode = 'percent' | 'tokens' | 'remaining' | 'both';
+
+/**
+ * Controls how the model name is displayed in the HUD badge.
+ *
+ *   full:    Show the raw display name as-is (e.g. "Opus 4.6 (1M context)")
+ *   compact: Strip redundant context-window suffix (e.g. "Opus 4.6")
+ *   short:   Strip context suffix AND "Claude " prefix (e.g. "Opus 4.6")
+ */
+export type ModelFormatMode = 'full' | 'compact' | 'short';
 export type HudElement = 'project' | 'context' | 'usage' | 'memory' | 'environment' | 'tools' | 'agents' | 'todos' | 'zenmux';
 export type HudColorName =
   | 'dim'
@@ -50,6 +60,7 @@ export const DEFAULT_ELEMENT_ORDER: HudElement[] = [
 const KNOWN_ELEMENTS = new Set<HudElement>(DEFAULT_ELEMENT_ORDER);
 
 export interface HudConfig {
+  language: Language;
   lineLayout: LineLayoutType;
   showSeparators: boolean;
   pathLevels: 1 | 2 | 3;
@@ -59,6 +70,8 @@ export interface HudConfig {
     showDirty: boolean;
     showAheadBehind: boolean;
     showFileStats: boolean;
+    pushWarningThreshold: number;
+    pushCriticalThreshold: number;
   };
   display: {
     showModel: boolean;
@@ -66,6 +79,7 @@ export interface HudConfig {
     showContextBar: boolean;
     contextValue: ContextValueMode;
     showConfigCounts: boolean;
+    showCost: boolean;
     showDuration: boolean;
     showSpeed: boolean;
     showTokenBreakdown: boolean;
@@ -79,16 +93,21 @@ export interface HudConfig {
     showMemoryUsage: boolean;
     showZenmuxQuota: boolean;
     zenmuxCacheTtlMs: number;
+    showSessionTokens: boolean;
+    showOutputStyle: boolean;
     autocompactBuffer: AutocompactBufferMode;
     usageThreshold: number;
     sevenDayThreshold: number;
     environmentThreshold: number;
+    modelFormat: ModelFormatMode;
+    modelOverride: string;
     customLine: string;
   };
   colors: HudColorOverrides;
 }
 
 export const DEFAULT_CONFIG: HudConfig = {
+  language: 'en',
   lineLayout: 'expanded',
   showSeparators: false,
   pathLevels: 1,
@@ -98,6 +117,8 @@ export const DEFAULT_CONFIG: HudConfig = {
     showDirty: true,
     showAheadBehind: false,
     showFileStats: false,
+    pushWarningThreshold: 0,
+    pushCriticalThreshold: 0,
   },
   display: {
     showModel: true,
@@ -105,6 +126,7 @@ export const DEFAULT_CONFIG: HudConfig = {
     showContextBar: true,
     contextValue: 'percent',
     showConfigCounts: false,
+    showCost: false,
     showDuration: false,
     showSpeed: false,
     showTokenBreakdown: true,
@@ -118,10 +140,14 @@ export const DEFAULT_CONFIG: HudConfig = {
     showMemoryUsage: false,
     showZenmuxQuota: false,
     zenmuxCacheTtlMs: 1000,
+    showSessionTokens: false,
+    showOutputStyle: false,
     autocompactBuffer: 'enabled',
     usageThreshold: 0,
     sevenDayThreshold: 80,
     environmentThreshold: 0,
+    modelFormat: 'full',
+    modelOverride: '',
     customLine: '',
   },
   colors: {
@@ -158,6 +184,14 @@ function validateAutocompactBuffer(value: unknown): value is AutocompactBufferMo
 
 function validateContextValue(value: unknown): value is ContextValueMode {
   return value === 'percent' || value === 'tokens' || value === 'remaining' || value === 'both';
+}
+
+function validateLanguage(value: unknown): value is Language {
+  return value === 'en' || value === 'zh';
+}
+
+function validateModelFormat(value: unknown): value is ModelFormatMode {
+  return value === 'full' || value === 'compact' || value === 'short';
 }
 
 function validateColorName(value: unknown): value is HudColorName {
@@ -240,8 +274,18 @@ function validateThreshold(value: unknown, max = 100): number {
   return Math.max(0, Math.min(max, value));
 }
 
+function validateCountThreshold(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.floor(value));
+}
+
 export function mergeConfig(userConfig: Partial<HudConfig>): HudConfig {
   const migrated = migrateConfig(userConfig);
+  const language = validateLanguage(migrated.language)
+    ? migrated.language
+    : DEFAULT_CONFIG.language;
 
   const lineLayout = validateLineLayout(migrated.lineLayout)
     ? migrated.lineLayout
@@ -270,6 +314,8 @@ export function mergeConfig(userConfig: Partial<HudConfig>): HudConfig {
     showFileStats: typeof migrated.gitStatus?.showFileStats === 'boolean'
       ? migrated.gitStatus.showFileStats
       : DEFAULT_CONFIG.gitStatus.showFileStats,
+    pushWarningThreshold: validateCountThreshold(migrated.gitStatus?.pushWarningThreshold),
+    pushCriticalThreshold: validateCountThreshold(migrated.gitStatus?.pushCriticalThreshold),
   };
 
   const display = {
@@ -288,6 +334,9 @@ export function mergeConfig(userConfig: Partial<HudConfig>): HudConfig {
     showConfigCounts: typeof migrated.display?.showConfigCounts === 'boolean'
       ? migrated.display.showConfigCounts
       : DEFAULT_CONFIG.display.showConfigCounts,
+    showCost: typeof migrated.display?.showCost === 'boolean'
+      ? migrated.display.showCost
+      : DEFAULT_CONFIG.display.showCost,
     showDuration: typeof migrated.display?.showDuration === 'boolean'
       ? migrated.display.showDuration
       : DEFAULT_CONFIG.display.showDuration,
@@ -329,12 +378,24 @@ export function mergeConfig(userConfig: Partial<HudConfig>): HudConfig {
       && migrated.display.zenmuxCacheTtlMs >= 0
       ? migrated.display.zenmuxCacheTtlMs
       : DEFAULT_CONFIG.display.zenmuxCacheTtlMs,
+    showSessionTokens: typeof migrated.display?.showSessionTokens === 'boolean'
+      ? migrated.display.showSessionTokens
+      : DEFAULT_CONFIG.display.showSessionTokens,
+    showOutputStyle: typeof migrated.display?.showOutputStyle === 'boolean'
+      ? migrated.display.showOutputStyle
+      : DEFAULT_CONFIG.display.showOutputStyle,
     autocompactBuffer: validateAutocompactBuffer(migrated.display?.autocompactBuffer)
       ? migrated.display.autocompactBuffer
       : DEFAULT_CONFIG.display.autocompactBuffer,
     usageThreshold: validateThreshold(migrated.display?.usageThreshold, 100),
     sevenDayThreshold: validateThreshold(migrated.display?.sevenDayThreshold, 100),
     environmentThreshold: validateThreshold(migrated.display?.environmentThreshold, 100),
+    modelFormat: validateModelFormat(migrated.display?.modelFormat)
+      ? migrated.display.modelFormat
+      : DEFAULT_CONFIG.display.modelFormat,
+    modelOverride: typeof migrated.display?.modelOverride === 'string'
+      ? migrated.display.modelOverride.slice(0, 80)
+      : DEFAULT_CONFIG.display.modelOverride,
     customLine: typeof migrated.display?.customLine === 'string'
       ? migrated.display.customLine.slice(0, 80)
       : DEFAULT_CONFIG.display.customLine,
@@ -376,7 +437,7 @@ export function mergeConfig(userConfig: Partial<HudConfig>): HudConfig {
       : DEFAULT_CONFIG.colors.custom,
   };
 
-  return { lineLayout, showSeparators, pathLevels, elementOrder, gitStatus, display, colors };
+  return { language, lineLayout, showSeparators, pathLevels, elementOrder, gitStatus, display, colors };
 }
 
 export async function loadConfig(): Promise<HudConfig> {
@@ -384,13 +445,13 @@ export async function loadConfig(): Promise<HudConfig> {
 
   try {
     if (!fs.existsSync(configPath)) {
-      return DEFAULT_CONFIG;
+      return mergeConfig({});
     }
 
     const content = fs.readFileSync(configPath, 'utf-8');
     const userConfig = JSON.parse(content) as Partial<HudConfig>;
     return mergeConfig(userConfig);
   } catch {
-    return DEFAULT_CONFIG;
+    return mergeConfig({});
   }
 }

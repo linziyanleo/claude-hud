@@ -39,6 +39,13 @@ Then run the install command below in that session. This is a [Claude Code platf
 /plugin install claude-hud
 ```
 
+After that, reload plugins:
+
+```
+/reload-plugins
+```
+
+
 **Step 3: Configure the statusline**
 ```
 /claude-hud:setup
@@ -47,7 +54,7 @@ Then run the install command below in that session. This is a [Claude Code platf
 <details>
 <summary><strong>⚠️ Windows users: Click here if setup says no JavaScript runtime was found</strong></summary>
 
-If setup says no JavaScript runtime was found on Windows, install one for your shell first. The simplest fallback is Node.js LTS:
+On Windows, Node.js LTS is the recommended runtime for Claude HUD. If setup says no JavaScript runtime was found, install Node.js for your shell first:
 ```powershell
 winget install OpenJS.NodeJS.LTS
 ```
@@ -80,7 +87,7 @@ Claude HUD gives you better insights into what's happening in your Claude Code s
 [Opus] │ my-project git:(main*)
 Context █████░░░░░ 45% │ Usage ██░░░░░░░░ 25% (1h 30m / 5h)
 ```
-- **Line 1** — Model, provider/auth label when relevant (for example `Bedrock` or `API`), project path, git branch
+- **Line 1** — Model, provider label when positively identified (for example `Bedrock`), project path, git branch
 - **Line 2** — Context bar (green → yellow → red) and usage rate limits
 
 ### Optional lines (enable via `/claude-hud:configure`)
@@ -117,11 +124,11 @@ Customize your HUD anytime:
 /claude-hud:configure
 ```
 
-The guided flow handles layout and display toggles. Advanced overrides such as
+The guided flow handles layout, language, and common display toggles. Advanced overrides such as
 custom colors and thresholds are preserved there, but you set them by editing the config file directly:
 
-- **First time setup**: Choose a preset (Full/Essential/Minimal), then fine-tune individual elements
-- **Customize anytime**: Toggle items on/off, adjust git display style, switch layouts
+- **First time setup**: Choose a preset (Full/Essential/Minimal), pick a label language, then fine-tune individual elements
+- **Customize anytime**: Toggle items on/off, adjust git display style, switch layouts, or change label language
 - **Preview before saving**: See exactly how your HUD will look before committing changes
 
 ### Presets
@@ -137,23 +144,30 @@ After choosing a preset, you can turn individual elements on or off.
 ### Manual Configuration
 
 Edit `~/.claude/plugins/claude-hud/config.json` directly for advanced settings such as `colors.*`,
-`pathLevels`, and threshold overrides. Running `/claude-hud:configure` preserves those manual settings.
+`pathLevels`, and threshold overrides. Running `/claude-hud:configure` preserves those manual settings while still letting you change `language`, layout, and the common guided toggles.
+
+Chinese HUD labels are available as an explicit opt-in. English stays the default unless you choose `中文` in `/claude-hud:configure` or set `language` in config.
 
 ### Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
+| `language` | `en` \| `zh` | `en` | HUD label language. English is the default; set `zh` to enable Chinese labels. |
 | `lineLayout` | string | `expanded` | Layout: `expanded` (multi-line) or `compact` (single line) |
 | `pathLevels` | 1-3 | 1 | Directory levels to show in project path |
 | `elementOrder` | string[] | `["project","context","usage","memory","environment","tools","agents","todos"]` | Expanded-mode element order. Omit entries to hide them in expanded mode. |
 | `gitStatus.enabled` | boolean | true | Show git branch in HUD |
 | `gitStatus.showDirty` | boolean | true | Show `*` for uncommitted changes |
 | `gitStatus.showAheadBehind` | boolean | false | Show `↑N ↓N` for ahead/behind remote |
+| `gitStatus.pushWarningThreshold` | number | 0 | Color the ahead count with the warning color at or above this unpushed-commit count (`0` disables it) |
+| `gitStatus.pushCriticalThreshold` | number | 0 | Color the ahead count with the critical color at or above this unpushed-commit count (`0` disables it) |
 | `gitStatus.showFileStats` | boolean | false | Show file change counts `!M +A ✘D ?U` |
 | `display.showModel` | boolean | true | Show model name `[Opus]` |
 | `display.showContextBar` | boolean | true | Show visual context bar `████░░░░░░` |
 | `display.contextValue` | `percent` \| `tokens` \| `remaining` \| `both` | `percent` | Context display format (`45%`, `45k/200k`, `55%` remaining, or `45% (45k/200k)`) |
 | `display.showConfigCounts` | boolean | false | Show CLAUDE.md, rules, MCPs, hooks counts |
+| `display.showCost` | boolean | false | Show session cost using Claude Code's native `cost.total_cost_usd` when available, with a local estimate fallback for direct Anthropic sessions |
+| `display.showOutputStyle` | boolean | false | Show the active Claude Code `outputStyle` from settings files as `style: <name>` |
 | `display.showDuration` | boolean | false | Show session duration `⏱️ 5m` |
 | `display.showSpeed` | boolean | false | Show output token speed `out: 42.1 tok/s` |
 | `display.showUsage` | boolean | true | Show Claude subscriber usage limits when available |
@@ -182,9 +196,13 @@ Supported color names: `dim`, `red`, `green`, `yellow`, `magenta`, `cyan`, `brig
 
 `display.showMemoryUsage` is fully opt-in and only renders in `expanded` layout. It reports approximate system RAM usage from the local machine, not precise memory pressure inside Claude Code or a specific process. The number may overstate actual pressure because reclaimable OS cache and buffers can still be counted as used memory.
 
+`display.showCost` is fully opt-in. ClaudeHUD prefers the native `cost.total_cost_usd` field that Claude Code provides on stdin when it is available. If that field is absent or invalid for a direct Anthropic session, ClaudeHUD falls back to the existing local transcript-based estimate so the cost line still works on older payloads. The native field is absent before the first API response in a session, so the cost display may stay hidden until then. ClaudeHUD also keeps the cost hidden for known routed providers such as Bedrock, because cloud-provider billed sessions may report `$0.00` or omit the field even though the session was not literally free.
+
 ### Usage Limits
 
 Usage display is **enabled by default** when Claude Code provides subscriber `rate_limits` data on stdin. It shows your rate limit consumption on line 2 alongside the context bar.
+
+ClaudeHUD intentionally trusts only the official statusline stdin payload for live usage. It does not read local OAuth credentials or poll undocumented usage endpoints in the background.
 
 Free/weekly-only accounts render the weekly window by itself instead of showing a ghost `5h: --` placeholder.
 
@@ -197,7 +215,7 @@ Context █████░░░░░ 45% │ Usage ██░░░░░░░
 To disable, set `display.showUsage` to `false`.
 
 **Requirements:**
-- Claude subscription usage data from Claude Code stdin
+- Claude Code must include subscriber `rate_limits` data on stdin for the current session
 - Not available for API-key-only users
 
 **Troubleshooting:** If usage doesn't appear:
@@ -206,12 +224,14 @@ To disable, set `display.showUsage` to `false`.
 - API users see no usage display (they have pay-per-token, not rate limits)
 - AWS Bedrock models display `Bedrock` and hide usage limits (usage is managed in AWS)
 - Claude Code may leave `rate_limits` empty until after the first model response in a session
-- Older Claude Code versions that do not emit `rate_limits` will not show subscriber usage
+- Some Claude Code builds and subscription tiers may still omit `rate_limits`, even after the first response
+- When `rate_limits` is missing, ClaudeHUD will hide usage instead of falling back to credential scraping or undocumented API calls
 
 ### Example Configuration
 
 ```json
 {
+  "language": "zh",
   "lineLayout": "expanded",
   "pathLevels": 2,
   "elementOrder": ["project", "tools", "context", "usage", "memory", "environment", "agents", "todos"],

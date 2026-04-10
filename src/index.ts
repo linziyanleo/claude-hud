@@ -7,6 +7,7 @@ import { loadConfig } from './config.js';
 import { parseExtraCmdArg, runExtraCmd } from './extra-cmd.js';
 import { getClaudeCodeVersion } from './version.js';
 import { getMemoryUsage } from './memory.js';
+import { setLanguage, t } from './i18n/index.js';
 import { fetchZenmuxQuota } from './zenmux.js';
 import type { RenderContext } from './types.js';
 import { fileURLToPath } from 'node:url';
@@ -53,26 +54,30 @@ export async function main(overrides: Partial<MainDeps> = {}): Promise<void> {
 
     if (!stdin) {
       // Running without stdin - this happens during setup verification
-      const isMacOS = process.platform === 'darwin';
-      deps.log('[claude-hud] Initializing...');
+      const config = await deps.loadConfig();
+      setLanguage(config.language);
+      const isMacOS = process.platform === "darwin";
+      deps.log(t("init.initializing"));
       if (isMacOS) {
-        deps.log('[claude-hud] Note: On macOS, you may need to restart Claude Code for the HUD to appear.');
+        deps.log(t("init.macosNote"));
       }
       return;
     }
 
-    const transcriptPath = stdin.transcript_path ?? '';
+    const transcriptPath = stdin.transcript_path ?? "";
     const transcript = await deps.parseTranscript(transcriptPath);
 
-    const { claudeMdCount, rulesCount, mcpCount, hooksCount } = await deps.countConfigs(stdin.cwd);
+    const { claudeMdCount, rulesCount, mcpCount, hooksCount, outputStyle } =
+      await deps.countConfigs(stdin.cwd);
 
     const config = await deps.loadConfig();
+    setLanguage(config.language);
     const gitStatus = config.gitStatus.enabled
       ? await deps.getGitStatus(stdin.cwd)
       : null;
 
     // Usage comes only from Claude Code's official stdin rate_limits fields.
-    let usageData: RenderContext['usageData'] = null;
+    let usageData: RenderContext["usageData"] = null;
     if (config.display.showUsage !== false) {
       usageData = deps.getUsageFromStdin(stdin);
     }
@@ -80,13 +85,17 @@ export async function main(overrides: Partial<MainDeps> = {}): Promise<void> {
     const extraCmd = deps.parseExtraCmdArg();
     const extraLabel = extraCmd ? await deps.runExtraCmd(extraCmd) : null;
 
-    const sessionDuration = formatSessionDuration(transcript.sessionStart, deps.now);
+    const sessionDuration = formatSessionDuration(
+      transcript.sessionStart,
+      deps.now,
+    );
     const claudeCodeVersion = config.display.showClaudeCodeVersion
       ? await deps.getClaudeCodeVersion()
       : undefined;
-    const memoryUsage = config.display.showMemoryUsage && config.lineLayout === 'expanded'
-      ? await deps.getMemoryUsage()
-      : null;
+    const memoryUsage =
+      config.display.showMemoryUsage && config.lineLayout === "expanded"
+        ? await deps.getMemoryUsage()
+        : null;
 
     const zenmuxQuota = config.display.showZenmuxQuota
       ? await deps.fetchZenmuxQuota(config.display.zenmuxCacheTtlMs)
@@ -106,24 +115,31 @@ export async function main(overrides: Partial<MainDeps> = {}): Promise<void> {
       zenmuxQuota,
       config,
       extraLabel,
+      outputStyle,
       claudeCodeVersion,
     };
 
     deps.render(ctx);
   } catch (error) {
-    deps.log('[claude-hud] Error:', error instanceof Error ? error.message : 'Unknown error');
+    deps.log(
+      "[claude-hud] Error:",
+      error instanceof Error ? error.message : "Unknown error",
+    );
   }
 }
 
-export function formatSessionDuration(sessionStart?: Date, now: () => number = () => Date.now()): string {
+export function formatSessionDuration(
+  sessionStart?: Date,
+  now: () => number = () => Date.now(),
+): string {
   if (!sessionStart) {
-    return '';
+    return "";
   }
 
   const ms = now() - sessionStart.getTime();
   const mins = Math.floor(ms / 60000);
 
-  if (mins < 1) return '<1m';
+  if (mins < 1) return "<1m";
   if (mins < 60) return `${mins}m`;
 
   const hours = Math.floor(mins / 60);

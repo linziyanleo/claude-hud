@@ -148,10 +148,10 @@ function getPathCandidates(command: string): string[] {
 
   const pathExt = (process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD')
     .split(';')
-    .map((value) => value.trim())
+    .map((value: string) => value.trim())
     .filter(Boolean);
 
-  return [command, ...pathExt.map((suffix) => `${command}${suffix.toLowerCase()}`), ...pathExt.map((suffix) => `${command}${suffix.toUpperCase()}`)];
+  return [command, ...pathExt.map((suffix: string) => `${command}${suffix.toLowerCase()}`), ...pathExt.map((suffix: string) => `${command}${suffix.toUpperCase()}`)];
 }
 
 function resolveClaudeBinaryFromPath(): ClaudeBinaryInfo | null {
@@ -235,10 +235,14 @@ export async function getClaudeCodeVersion(): Promise<string | undefined> {
     }
   }
 
-  const binaryInfo = resolveClaudeBinaryImpl();
-  if (!binaryInfo) {
+  const resolvedBinaryInfo = resolveClaudeBinaryImpl();
+  if (!resolvedBinaryInfo) {
     return undefined;
   }
+
+  // Normalize resolver output to the actual on-disk binary so cache keys and
+  // persisted mtimes stay stable across process boundaries.
+  const binaryInfo = statResolvedBinary(resolvedBinaryInfo.path) ?? resolvedBinaryInfo;
 
   const binaryKey = getBinaryCacheKey(binaryInfo);
   if (hasResolved && cachedBinaryKey === binaryKey) {

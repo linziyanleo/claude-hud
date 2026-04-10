@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import * as readline from 'readline';
 import { createHash } from 'node:crypto';
 import { getHudPluginDir } from './claude-config-dir.js';
-import type { TranscriptData, ToolEntry, AgentEntry, TodoItem } from './types.js';
+import type { TranscriptData, ToolEntry, AgentEntry, TodoItem, SessionTokenUsage } from './types.js';
 
 interface TranscriptLine {
   timestamp?: string;
@@ -13,6 +13,12 @@ interface TranscriptLine {
   customTitle?: string;
   message?: {
     content?: ContentBlock[];
+    usage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
+    };
   };
 }
 
@@ -46,6 +52,7 @@ interface SerializedTranscriptData {
   todos: TodoItem[];
   sessionStart?: string;
   sessionName?: string;
+  sessionTokens?: SessionTokenUsage;
 }
 
 interface TranscriptCacheFile {
@@ -55,6 +62,28 @@ interface TranscriptCacheFile {
 }
 
 let createReadStreamImpl: typeof fs.createReadStream = fs.createReadStream;
+
+function normalizeTokenCount(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.trunc(value));
+}
+
+function normalizeSessionTokens(tokens: unknown): SessionTokenUsage | undefined {
+  if (!tokens || typeof tokens !== 'object') {
+    return undefined;
+  }
+
+  const raw = tokens as Record<string, unknown>;
+  return {
+    inputTokens: normalizeTokenCount(raw.inputTokens),
+    outputTokens: normalizeTokenCount(raw.outputTokens),
+    cacheCreationTokens: normalizeTokenCount(raw.cacheCreationTokens),
+    cacheReadTokens: normalizeTokenCount(raw.cacheReadTokens),
+  };
+}
 
 function getTranscriptCachePath(transcriptPath: string, homeDir: string): string {
   const hash = createHash('sha256').update(path.resolve(transcriptPath)).digest('hex');
@@ -91,6 +120,7 @@ function serializeTranscriptData(data: TranscriptData): SerializedTranscriptData
     todos: data.todos.map((todo) => ({ ...todo })),
     sessionStart: data.sessionStart?.toISOString(),
     sessionName: data.sessionName,
+    sessionTokens: data.sessionTokens,
   };
 }
 
@@ -109,6 +139,7 @@ function deserializeTranscriptData(data: SerializedTranscriptData): TranscriptDa
     todos: data.todos.map((todo) => ({ ...todo })),
     sessionStart: data.sessionStart ? new Date(data.sessionStart) : undefined,
     sessionName: data.sessionName,
+    sessionTokens: normalizeSessionTokens(data.sessionTokens),
   };
 }
 
@@ -173,6 +204,12 @@ export async function parseTranscript(transcriptPath: string): Promise<Transcrip
   const taskIdToIndex = new Map<string, number>();
   let latestSlug: string | undefined;
   let customTitle: string | undefined;
+  const sessionTokens: SessionTokenUsage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheCreationTokens: 0,
+    cacheReadTokens: 0,
+  };
 
   let parsedCleanly = false;
 
@@ -193,6 +230,14 @@ export async function parseTranscript(transcriptPath: string): Promise<Transcrip
         } else if (typeof entry.slug === 'string') {
           latestSlug = entry.slug;
         }
+        // Accumulate token usage from assistant messages
+        if (entry.type === 'assistant' && entry.message?.usage) {
+          const usage = entry.message.usage;
+          sessionTokens.inputTokens += normalizeTokenCount(usage.input_tokens);
+          sessionTokens.outputTokens += normalizeTokenCount(usage.output_tokens);
+          sessionTokens.cacheCreationTokens += normalizeTokenCount(usage.cache_creation_input_tokens);
+          sessionTokens.cacheReadTokens += normalizeTokenCount(usage.cache_read_input_tokens);
+        }
         processEntry(entry, toolMap, agentMap, taskIdToIndex, latestTodos, result);
       } catch {
         // Skip malformed lines
@@ -208,6 +253,7 @@ export async function parseTranscript(transcriptPath: string): Promise<Transcrip
   result.agents = Array.from(agentMap.values()).slice(-10);
   result.todos = latestTodos;
   result.sessionName = customTitle ?? latestSlug;
+  result.sessionTokens = sessionTokens;
   if (parsedCleanly) {
     writeTranscriptCache(transcriptPath, transcriptState, result);
   }
@@ -246,7 +292,7 @@ function processEntry(
         startTime: timestamp,
       };
 
-      if (block.name === 'Task') {
+      if (block.name === 'Task' || block.name === 'Agent') {
         const input = block.input as Record<string, unknown>;
         const agentEntry: AgentEntry = {
           id: block.id,
@@ -260,9 +306,31 @@ function processEntry(
       } else if (block.name === 'TodoWrite') {
         const input = block.input as { todos?: TodoItem[] };
         if (input?.todos && Array.isArray(input.todos)) {
+          // Build reverse map: content → taskIds from existing state
+          const contentToTaskIds = new Map<string, string[]>();
+          for (const [taskId, idx] of taskIdToIndex) {
+            if (idx < latestTodos.length) {
+              const content = latestTodos[idx].content;
+              const ids = contentToTaskIds.get(content) ?? [];
+              ids.push(taskId);
+              contentToTaskIds.set(content, ids);
+            }
+          }
+
           latestTodos.length = 0;
           taskIdToIndex.clear();
           latestTodos.push(...input.todos);
+
+          // Re-register taskId mappings for items whose content matches
+          for (let i = 0; i < latestTodos.length; i++) {
+            const ids = contentToTaskIds.get(latestTodos[i].content);
+            if (ids) {
+              for (const taskId of ids) {
+                taskIdToIndex.set(taskId, i);
+              }
+              contentToTaskIds.delete(latestTodos[i].content);
+            }
+          }
         }
       } else if (block.name === 'TaskCreate') {
         const input = block.input as Record<string, unknown>;

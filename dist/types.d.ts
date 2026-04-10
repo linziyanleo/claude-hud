@@ -18,6 +18,13 @@ export interface StdinData {
         used_percentage?: number | null;
         remaining_percentage?: number | null;
     };
+    cost?: {
+        total_cost_usd?: number | null;
+        total_duration_ms?: number | null;
+        total_api_duration_ms?: number | null;
+        total_lines_added?: number | null;
+        total_lines_removed?: number | null;
+    } | null;
     rate_limits?: {
         five_hour?: {
             used_percentage?: number | null;
@@ -76,12 +83,19 @@ export interface ZenmuxQuotaData {
     sevenDay: ZenmuxQuotaWindow;
     accountStatus: string;
 }
+export interface SessionTokenUsage {
+    inputTokens: number;
+    outputTokens: number;
+    cacheCreationTokens: number;
+    cacheReadTokens: number;
+}
 export interface TranscriptData {
     tools: ToolEntry[];
     agents: AgentEntry[];
     todos: TodoItem[];
     sessionStart?: Date;
     sessionName?: string;
+    sessionTokens?: SessionTokenUsage;
 }
 export interface RenderContext {
     stdin: StdinData;
@@ -97,6 +111,7 @@ export interface RenderContext {
     zenmuxQuota: ZenmuxQuotaData | null;
     config: HudConfig;
     extraLabel: string | null;
+    outputStyle?: string;
     claudeCodeVersion?: string;
 }
 //# sourceMappingURL=types.d.ts.map

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { render } from '../dist/render/index.js';
+import { setLanguage } from '../dist/i18n/index.js';
 
 function baseContext() {
   return {
@@ -53,7 +54,9 @@ function baseContext() {
 
 function stripAnsi(str) {
   // eslint-disable-next-line no-control-regex
-  return str.replace(/\x1b\[[0-9;]*m/g, '');
+  return str
+    .replace(/\x1b\[[0-9;]*m/g, '')
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
 }
 
 function isWideCodePoint(codePoint) {
@@ -212,6 +215,117 @@ test('render falls back to stderr.columns when stdout.columns is unavailable', (
   assert.ok(lines.some(line => displayWidth(line) > 10), 'stderr width should override COLUMNS fallback');
 });
 
+test('render ignores OSC 8 hyperlink sequences when measuring line width', () => {
+  const ctx = baseContext();
+  ctx.config.lineLayout = 'compact';
+  ctx.stdin.context_window.current_usage.input_tokens = 0;
+  ctx.config.display.showContextBar = false;
+  ctx.config.display.showConfigCounts = false;
+  ctx.config.display.showUsage = false;
+  ctx.stdin.cwd = '/tmp/my-project';
+  ctx.sessionDuration = '1m';
+  ctx.extraLabel = '\x1b]8;;file:///tmp/my-project\x1b\\linked-label\x1b]8;;\x1b\\';
+
+  let lines = [];
+  withTerminal(47, () => {
+    lines = captureRender(ctx);
+  });
+
+  assert.equal(lines.length, 1, 'a visibly short line with an OSC 8 hyperlink should stay on one line');
+  assert.ok(lines[0].includes('linked-label'), 'hyperlink label text should still render');
+  assert.ok(lines[0].includes('1m'), 'later elements should not be wrapped off the line');
+  assert.ok(displayWidth(lines[0]) <= 47, 'visible width should respect terminal width');
+});
+
+test('render ignores BEL-terminated OSC 8 hyperlink sequences when measuring line width', () => {
+  const ctx = baseContext();
+  ctx.config.lineLayout = 'compact';
+  ctx.stdin.context_window.current_usage.input_tokens = 0;
+  ctx.config.display.showContextBar = false;
+  ctx.config.display.showConfigCounts = false;
+  ctx.config.display.showUsage = false;
+  ctx.stdin.cwd = '/tmp/my-project';
+  ctx.sessionDuration = '1m';
+  ctx.extraLabel = '\x1b]8;;file:///tmp/my-project\x07linked-label\x1b]8;;\x07';
+
+  let lines = [];
+  withTerminal(47, () => {
+    lines = captureRender(ctx);
+  });
+
+  assert.equal(lines.length, 1, 'a visibly short BEL-terminated OSC 8 hyperlink should stay on one line');
+  assert.ok(lines[0].includes('linked-label'), 'hyperlink label text should still render');
+  assert.ok(lines[0].includes('1m'), 'later elements should not be wrapped off the line');
+  assert.ok(displayWidth(lines[0]) <= 47, 'visible width should respect terminal width');
+});
+
+test('render falls back to a safe default width when no terminal size is available', () => {
+  const ctx = baseContext();
+  ctx.stdin.model = { display_name: 'Sonnet 4.6' };
+  ctx.stdin.cwd = '/tmp/very-long-project-name-for-ghostty-fallback-check';
+  ctx.gitStatus = {
+    branch: 'feature/ghostty-width-fallback',
+    isDirty: true,
+    ahead: 0,
+    behind: 0,
+    fileStats: { modified: 2, added: 1, deleted: 0, untracked: 1 },
+  };
+  ctx.config.gitStatus.showFileStats = true;
+  ctx.usageData = {
+    planName: 'Pro',
+    fiveHour: 42,
+    sevenDay: 12,
+    fiveHourResetAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
+    sevenDayResetAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+  };
+
+  const originalEnvColumns = process.env.COLUMNS;
+  let lines = [];
+  withColumns(process.stdout, undefined, () => {
+    withColumns(process.stderr, undefined, () => {
+      delete process.env.COLUMNS;
+      try {
+        lines = captureRender(ctx);
+      } finally {
+        if (originalEnvColumns === undefined) {
+          delete process.env.COLUMNS;
+        } else {
+          process.env.COLUMNS = originalEnvColumns;
+        }
+      }
+    });
+  });
+
+  assert.ok(lines.length > 1, 'should wrap output instead of emitting one oversized line');
+  assert.ok(lines.every(line => displayWidth(line) <= 80), 'all lines should fit the safe fallback width');
+});
+
+test('render does not strand a bare 5h continuation line in compact mode', () => {
+  const ctx = baseContext();
+  ctx.config.lineLayout = 'compact';
+  ctx.config.display.usageBarEnabled = false;
+  ctx.config.display.showConfigCounts = false;
+  ctx.stdin.cwd = '/tmp/project';
+  ctx.usageData = {
+    planName: 'Pro',
+    fiveHour: 30,
+    sevenDay: 85,
+    fiveHourResetAt: new Date(Date.now() + 60 * 60 * 1000),
+    sevenDayResetAt: new Date(Date.now() + 28 * 60 * 60 * 1000),
+  };
+
+  let lines = [];
+  withColumns(process.stdout, undefined, () => {
+    withColumns(process.stderr, 40, () => {
+      lines = captureRender(ctx);
+    });
+  });
+
+  assert.ok(lines.some(line => line.includes('Usage 5h 30%')), `expected usage window to keep its label: ${lines.join(' | ')}`);
+  assert.ok(lines.some(line => line.includes('Weekly 85%')), `expected weekly usage window to render: ${lines.join(' | ')}`);
+  assert.ok(!lines.some(line => line.startsWith('5h ')), `did not expect a bare 5h continuation line: ${lines.join(' | ')}`);
+});
+
 test('render prefers stdout columns over COLUMNS env fallback', () => {
   const ctx = baseContext();
   ctx.stdin.cwd = '/tmp/very-long-project-name-for-width-checking';
@@ -286,4 +400,52 @@ test('render truncation respects Unicode display width', () => {
 
   assert.ok(lines.some(line => line.includes('...')), 'should truncate an overlong Unicode segment');
   assert.ok(lines.every(line => displayWidth(line) <= 10), 'all lines should respect terminal cell width');
+});
+
+test('render keeps context and usage as separate lines when a narrow terminal cannot fit both', () => {
+  const ctx = baseContext();
+  ctx.config.lineLayout = 'expanded';
+  ctx.config.display.usageBarEnabled = true;
+  ctx.stdin.context_window.current_usage.input_tokens = 120000;
+  ctx.usageData = {
+    fiveHour: 62,
+    sevenDay: null,
+    fiveHourResetAt: null,
+    sevenDayResetAt: null,
+  };
+
+  let lines = [];
+  withTerminal(24, () => {
+    lines = captureRender(ctx);
+  });
+
+  assert.ok(lines.some(line => line.includes('Context')), 'context line should remain visible');
+  assert.ok(lines.some(line => line.includes('Usage')), 'usage line should remain visible');
+  assert.ok(lines.every(line => displayWidth(line) <= 24), 'all lines should still fit terminal width');
+});
+
+test('render respects terminal width with Chinese labels enabled', () => {
+  const ctx = baseContext();
+  ctx.config.lineLayout = 'expanded';
+  ctx.usageData = {
+    planName: 'Pro',
+    fiveHour: 42,
+    sevenDay: 12,
+    fiveHourResetAt: new Date(Date.now() + 90 * 60000),
+    sevenDayResetAt: new Date(Date.now() + 24 * 60 * 60000),
+  };
+
+  let lines = [];
+  setLanguage('zh');
+  try {
+    withTerminal(18, () => {
+      lines = captureRender(ctx);
+    });
+  } finally {
+    setLanguage('en');
+  }
+
+  assert.ok(lines.some(line => line.includes('上下文')), 'should render the translated context label');
+  assert.ok(lines.some(line => line.includes('用量')), 'should render the translated usage label');
+  assert.ok(lines.every(line => displayWidth(line) <= 18), 'all lines should fit terminal width with CJK labels');
 });

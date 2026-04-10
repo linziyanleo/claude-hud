@@ -7,6 +7,7 @@ import { loadConfig } from './config.js';
 import { parseExtraCmdArg, runExtraCmd } from './extra-cmd.js';
 import { getClaudeCodeVersion } from './version.js';
 import { getMemoryUsage } from './memory.js';
+import { setLanguage, t } from './i18n/index.js';
 import { fetchZenmuxQuota } from './zenmux.js';
 import { fileURLToPath } from 'node:url';
 import { realpathSync } from 'node:fs';
@@ -32,17 +33,20 @@ export async function main(overrides = {}) {
         const stdin = await deps.readStdin();
         if (!stdin) {
             // Running without stdin - this happens during setup verification
-            const isMacOS = process.platform === 'darwin';
-            deps.log('[claude-hud] Initializing...');
+            const config = await deps.loadConfig();
+            setLanguage(config.language);
+            const isMacOS = process.platform === "darwin";
+            deps.log(t("init.initializing"));
             if (isMacOS) {
-                deps.log('[claude-hud] Note: On macOS, you may need to restart Claude Code for the HUD to appear.');
+                deps.log(t("init.macosNote"));
             }
             return;
         }
-        const transcriptPath = stdin.transcript_path ?? '';
+        const transcriptPath = stdin.transcript_path ?? "";
         const transcript = await deps.parseTranscript(transcriptPath);
-        const { claudeMdCount, rulesCount, mcpCount, hooksCount } = await deps.countConfigs(stdin.cwd);
+        const { claudeMdCount, rulesCount, mcpCount, hooksCount, outputStyle } = await deps.countConfigs(stdin.cwd);
         const config = await deps.loadConfig();
+        setLanguage(config.language);
         const gitStatus = config.gitStatus.enabled
             ? await deps.getGitStatus(stdin.cwd)
             : null;
@@ -57,7 +61,7 @@ export async function main(overrides = {}) {
         const claudeCodeVersion = config.display.showClaudeCodeVersion
             ? await deps.getClaudeCodeVersion()
             : undefined;
-        const memoryUsage = config.display.showMemoryUsage && config.lineLayout === 'expanded'
+        const memoryUsage = config.display.showMemoryUsage && config.lineLayout === "expanded"
             ? await deps.getMemoryUsage()
             : null;
         const zenmuxQuota = config.display.showZenmuxQuota
@@ -77,22 +81,23 @@ export async function main(overrides = {}) {
             zenmuxQuota,
             config,
             extraLabel,
+            outputStyle,
             claudeCodeVersion,
         };
         deps.render(ctx);
     }
     catch (error) {
-        deps.log('[claude-hud] Error:', error instanceof Error ? error.message : 'Unknown error');
+        deps.log("[claude-hud] Error:", error instanceof Error ? error.message : "Unknown error");
     }
 }
 export function formatSessionDuration(sessionStart, now = () => Date.now()) {
     if (!sessionStart) {
-        return '';
+        return "";
     }
     const ms = now() - sessionStart.getTime();
     const mins = Math.floor(ms / 60000);
     if (mins < 1)
-        return '<1m';
+        return "<1m";
     if (mins < 60)
         return `${mins}m`;
     const hours = Math.floor(mins / 60);

@@ -1,7 +1,8 @@
 export { renderIdentityLine } from './identity.js';
-export { renderProjectLine } from './project.js';
+export { renderProjectLine, renderGitFilesLine } from './project.js';
 export { renderEnvironmentLine } from './environment.js';
 export { renderUsageLine } from './usage.js';
 export { renderMemoryLine } from './memory.js';
 export { renderZenmuxLine } from './zenmux.js';
+export { renderSessionTokensLine } from './session-tokens.js';
 //# sourceMappingURL=index.d.ts.map

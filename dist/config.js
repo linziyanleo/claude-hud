@@ -15,6 +15,7 @@ export const DEFAULT_ELEMENT_ORDER = [
 ];
 const KNOWN_ELEMENTS = new Set(DEFAULT_ELEMENT_ORDER);
 export const DEFAULT_CONFIG = {
+    language: 'en',
     lineLayout: 'expanded',
     showSeparators: false,
     pathLevels: 1,
@@ -24,6 +25,8 @@ export const DEFAULT_CONFIG = {
         showDirty: true,
         showAheadBehind: false,
         showFileStats: false,
+        pushWarningThreshold: 0,
+        pushCriticalThreshold: 0,
     },
     display: {
         showModel: true,
@@ -31,6 +34,7 @@ export const DEFAULT_CONFIG = {
         showContextBar: true,
         contextValue: 'percent',
         showConfigCounts: false,
+        showCost: false,
         showDuration: false,
         showSpeed: false,
         showTokenBreakdown: true,
@@ -44,10 +48,14 @@ export const DEFAULT_CONFIG = {
         showMemoryUsage: false,
         showZenmuxQuota: false,
         zenmuxCacheTtlMs: 1000,
+        showSessionTokens: false,
+        showOutputStyle: false,
         autocompactBuffer: 'enabled',
         usageThreshold: 0,
         sevenDayThreshold: 80,
         environmentThreshold: 0,
+        modelFormat: 'full',
+        modelOverride: '',
         customLine: '',
     },
     colors: {
@@ -79,6 +87,12 @@ function validateAutocompactBuffer(value) {
 }
 function validateContextValue(value) {
     return value === 'percent' || value === 'tokens' || value === 'remaining' || value === 'both';
+}
+function validateLanguage(value) {
+    return value === 'en' || value === 'zh';
+}
+function validateModelFormat(value) {
+    return value === 'full' || value === 'compact' || value === 'short';
 }
 function validateColorName(value) {
     return value === 'dim'
@@ -152,8 +166,17 @@ function validateThreshold(value, max = 100) {
         return 0;
     return Math.max(0, Math.min(max, value));
 }
+function validateCountThreshold(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return 0;
+    }
+    return Math.max(0, Math.floor(value));
+}
 export function mergeConfig(userConfig) {
     const migrated = migrateConfig(userConfig);
+    const language = validateLanguage(migrated.language)
+        ? migrated.language
+        : DEFAULT_CONFIG.language;
     const lineLayout = validateLineLayout(migrated.lineLayout)
         ? migrated.lineLayout
         : DEFAULT_CONFIG.lineLayout;
@@ -177,6 +200,8 @@ export function mergeConfig(userConfig) {
         showFileStats: typeof migrated.gitStatus?.showFileStats === 'boolean'
             ? migrated.gitStatus.showFileStats
             : DEFAULT_CONFIG.gitStatus.showFileStats,
+        pushWarningThreshold: validateCountThreshold(migrated.gitStatus?.pushWarningThreshold),
+        pushCriticalThreshold: validateCountThreshold(migrated.gitStatus?.pushCriticalThreshold),
     };
     const display = {
         showModel: typeof migrated.display?.showModel === 'boolean'
@@ -194,6 +219,9 @@ export function mergeConfig(userConfig) {
         showConfigCounts: typeof migrated.display?.showConfigCounts === 'boolean'
             ? migrated.display.showConfigCounts
             : DEFAULT_CONFIG.display.showConfigCounts,
+        showCost: typeof migrated.display?.showCost === 'boolean'
+            ? migrated.display.showCost
+            : DEFAULT_CONFIG.display.showCost,
         showDuration: typeof migrated.display?.showDuration === 'boolean'
             ? migrated.display.showDuration
             : DEFAULT_CONFIG.display.showDuration,
@@ -235,12 +263,24 @@ export function mergeConfig(userConfig) {
             && migrated.display.zenmuxCacheTtlMs >= 0
             ? migrated.display.zenmuxCacheTtlMs
             : DEFAULT_CONFIG.display.zenmuxCacheTtlMs,
+        showSessionTokens: typeof migrated.display?.showSessionTokens === 'boolean'
+            ? migrated.display.showSessionTokens
+            : DEFAULT_CONFIG.display.showSessionTokens,
+        showOutputStyle: typeof migrated.display?.showOutputStyle === 'boolean'
+            ? migrated.display.showOutputStyle
+            : DEFAULT_CONFIG.display.showOutputStyle,
         autocompactBuffer: validateAutocompactBuffer(migrated.display?.autocompactBuffer)
             ? migrated.display.autocompactBuffer
             : DEFAULT_CONFIG.display.autocompactBuffer,
         usageThreshold: validateThreshold(migrated.display?.usageThreshold, 100),
         sevenDayThreshold: validateThreshold(migrated.display?.sevenDayThreshold, 100),
         environmentThreshold: validateThreshold(migrated.display?.environmentThreshold, 100),
+        modelFormat: validateModelFormat(migrated.display?.modelFormat)
+            ? migrated.display.modelFormat
+            : DEFAULT_CONFIG.display.modelFormat,
+        modelOverride: typeof migrated.display?.modelOverride === 'string'
+            ? migrated.display.modelOverride.slice(0, 80)
+            : DEFAULT_CONFIG.display.modelOverride,
         customLine: typeof migrated.display?.customLine === 'string'
             ? migrated.display.customLine.slice(0, 80)
             : DEFAULT_CONFIG.display.customLine,
@@ -280,20 +320,20 @@ export function mergeConfig(userConfig) {
             ? migrated.colors.custom
             : DEFAULT_CONFIG.colors.custom,
     };
-    return { lineLayout, showSeparators, pathLevels, elementOrder, gitStatus, display, colors };
+    return { language, lineLayout, showSeparators, pathLevels, elementOrder, gitStatus, display, colors };
 }
 export async function loadConfig() {
     const configPath = getConfigPath();
     try {
         if (!fs.existsSync(configPath)) {
-            return DEFAULT_CONFIG;
+            return mergeConfig({});
         }
         const content = fs.readFileSync(configPath, 'utf-8');
         const userConfig = JSON.parse(content);
         return mergeConfig(userConfig);
     }
     catch {
-        return DEFAULT_CONFIG;
+        return mergeConfig({});
     }
 }
 //# sourceMappingURL=config.js.map

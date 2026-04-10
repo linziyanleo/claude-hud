@@ -1,5 +1,5 @@
 ---
-description: Configure HUD display options (layout, presets, display elements) while preserving advanced manual overrides
+description: Configure HUD display options (layout, language, presets, display elements) while preserving advanced manual overrides
 allowed-tools: Read, Write, AskUserQuestion
 ---
 
@@ -23,14 +23,14 @@ Advanced settings such as `colors.*`, `pathLevels`, `display.usageThreshold`, an
 ## Two Flows Based on Config State
 
 ### Flow A: New User (no config)
-Questions: **Layout → Preset → Turn Off → Turn On**
+Questions: **Layout → Preset → Language → Turn Off → Turn On → Custom Line**
 
 ### Flow B: Update Config (config exists)
-Questions: **Turn Off → Turn On → Git Style → Layout/Reset → Custom Line** (5 questions max)
+Questions: **Turn Off → Turn On → Git Style → Layout/Reset → Language → Custom Line** (6 questions max)
 
 ---
 
-## Flow A: New User (5 Questions)
+## Flow A: New User (6 Questions)
 
 ### Q1: Layout
 - header: "Layout"
@@ -50,7 +50,17 @@ Questions: **Turn Off → Turn On → Git Style → Layout/Reset → Custom Line
   - "Essential" - Activity + git, minimal info
   - "Minimal" - Core only (model, context bar)
 
-### Q3: Turn Off (based on chosen preset)
+### Q3: Language
+- header: "Language"
+- question: "Choose your HUD label language:"
+- multiSelect: false
+- options:
+  - "English (Recommended)" - Default, simplest onboarding path
+  - "中文" - Show HUD labels and status text in Chinese
+
+Save as `language: "en"` or `language: "zh"`.
+
+### Q4: Turn Off (based on chosen preset)
 - header: "Turn Off"
 - question: "Disable any of these? (enabled by your preset)"
 - multiSelect: true
@@ -66,18 +76,19 @@ Questions: **Turn Off → Turn On → Git Style → Layout/Reset → Custom Line
   - "Usage limits" - 5h: 25% | 7d: 10%
   - "Session duration" - ⏱️ 5m
   - "Session name" - fix-auth-bug (session slug or custom title)
+  - "Session tokens" - Tokens 12.8M (in: 7k, out: 28k, cache: 12.8M)
 
-### Q4: Turn On (based on chosen preset)
+### Q5: Turn On (based on chosen preset)
 - header: "Turn On"
 - question: "Enable any of these? (disabled by your preset)"
 - multiSelect: true
 - options: **ONLY items that are OFF in the chosen preset** (max 4)
   - (same list as above, filtered to OFF items)
 
-**Note:** If preset has all items ON (Full), Q4 shows "Nothing to enable - Full preset has everything!"
-If preset has all items OFF (Minimal), Q3 shows "Nothing to disable - Minimal preset is already minimal!"
+**Note:** If preset has all items ON (Full), Q5 shows "Nothing to enable - Full preset has everything!"
+If preset has all items OFF (Minimal), Q4 shows "Nothing to disable - Minimal preset is already minimal!"
 
-### Q5: Custom Line (optional)
+### Q6: Custom Line (optional)
 - header: "Custom Line"
 - question: "Add a custom phrase to display in the HUD? (e.g. a motto, max 80 chars)"
 - multiSelect: false
@@ -89,7 +100,7 @@ If user chooses "Enter custom text", use AskUserQuestion to get their text. Save
 
 ---
 
-## Flow B: Update Config (5 Questions)
+## Flow B: Update Config (6 Questions)
 
 ### Q1: Turn Off
 - header: "Turn Off"
@@ -102,6 +113,7 @@ If user chooses "Enter custom text", use AskUserQuestion to get their text. Save
   - "Project name" - my-project path display
   - "Git status" - git:(main*) branch indicator
   - "Session name" - fix-auth-bug (session slug or custom title)
+  - "Session tokens" - Tokens 12.8M (in: 7k, out: 28k, cache: 12.8M)
   - "Usage bar style" - ██░░ 25% visual bar (only if usageBarEnabled is true)
 
 If more than 4 items ON, show Activity items (Tools, Agents, Todos, Project, Git) first.
@@ -118,6 +130,7 @@ Info items (Counts, Tokens, Usage, Speed, Duration) can be turned off via "Reset
   - "Usage limits" - 5h: 25% | 7d: 10%
   - "Usage bar style" - ██░░ 25% visual bar (only if usageBarEnabled is false)
   - "Session name" - fix-auth-bug (session slug or custom title)
+  - "Session tokens" - Tokens 12.8M (in: 7k, out: 28k, cache: 12.8M)
   - "Session duration" - ⏱️ 5m
 
 ### Q3: Git Style (only if Git is currently enabled)
@@ -143,7 +156,20 @@ Info items (Counts, Tokens, Usage, Speed, Duration) can be turned off via "Reset
   - "Reset to Full" - Enable everything
   - "Reset to Essential" - Activity + git only
 
-### Q5: Custom Line (optional)
+### Q5: Language
+- header: "Language"
+- question: "Update HUD label language? (current: '{English or 中文}')"
+- multiSelect: false
+- options:
+  - "Keep current" - No change
+  - "English (Recommended)" - Use English HUD labels
+  - "中文" - Use Chinese HUD labels
+
+If user chooses "Keep current", leave `language` unchanged.
+If user chooses "English (Recommended)", save `language: "en"`.
+If user chooses "中文", save `language: "zh"`.
+
+### Q6: Custom Line (optional)
 - header: "Custom Line"
 - question: "Update your custom phrase? (currently: '{current customLine or none}')"
 - multiSelect: false
@@ -161,17 +187,17 @@ If user chooses "Remove", set `display.customLine` to `""` in config.
 
 **Full** (everything ON):
 - Activity: Tools ON, Agents ON, Todos ON
-- Info: Counts ON, Tokens ON, Usage ON, Duration ON, Session Name ON
+- Info: Counts ON, Tokens ON, Usage ON, Duration ON, Session Name ON, Session Tokens ON
 - Git: ON (with dirty indicator, no ahead/behind)
 
 **Essential** (activity + git):
 - Activity: Tools ON, Agents ON, Todos ON
-- Info: Counts OFF, Tokens OFF, Usage OFF, Duration ON, Session Name OFF
+- Info: Counts OFF, Tokens OFF, Usage OFF, Duration ON, Session Name OFF, Session Tokens OFF
 - Git: ON (with dirty indicator)
 
 **Minimal** (core only — this is the default):
 - Activity: Tools OFF, Agents OFF, Todos OFF
-- Info: Counts OFF, Tokens OFF, Usage OFF, Duration OFF, Session Name OFF
+- Info: Counts OFF, Tokens OFF, Usage OFF, Duration OFF, Session Name OFF, Session Tokens OFF
 - Git: ON (with dirty indicator)
 
 ---
@@ -183,6 +209,15 @@ If user chooses "Remove", set `display.customLine` to `""` in config.
 | Expanded | `lineLayout: "expanded", showSeparators: false` |
 | Compact | `lineLayout: "compact", showSeparators: false` |
 | Compact + Separators | `lineLayout: "compact", showSeparators: true` |
+
+---
+
+## Language Mapping
+
+| Option | Config |
+|--------|--------|
+| English (Recommended) | `language: "en"` |
+| 中文 | `language: "zh"` |
 
 ---
 
@@ -213,6 +248,7 @@ If user chooses "Remove", set `display.customLine` to `""` in config.
 | Usage bar style | `display.usageBarEnabled` |
 | Session name | `display.showSessionName` |
 | Session duration | `display.showDuration` |
+| Session tokens | `display.showSessionTokens` |
 | Custom line | `display.customLine` |
 
 **Always true (not configurable):**
@@ -236,9 +272,10 @@ If user chooses "Remove", set `display.customLine` to `""` in config.
 
 ### For New Users (Flow A):
 1. Apply chosen preset as base
-2. Apply Turn Off selections (set those items to OFF)
-3. Apply Turn On selections (set those items to ON)
-4. Apply chosen layout
+2. Apply chosen language
+3. Apply Turn Off selections (set those items to OFF)
+4. Apply Turn On selections (set those items to ON)
+5. Apply chosen layout
 
 ### For Returning Users (Flow B):
 1. Start from current config
@@ -247,6 +284,7 @@ If user chooses "Remove", set `display.customLine` to `""` in config.
 4. Apply Git Style selection (if shown)
 5. If "Reset to [preset]" selected, override with preset values
 6. If layout change selected, apply it
+7. If language change selected, apply it
 
 ---
 
@@ -261,6 +299,7 @@ If user chooses "Remove", set `display.customLine` to `""` in config.
 1. **Summary of changes:**
 ```
 Layout: Compact → Expanded
+Language: English → 中文
 Git style: Branch + dirty
 Changes:
   - Usage limits: OFF → ON

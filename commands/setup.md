@@ -116,10 +116,15 @@ This is a [Claude Code platform limitation](https://github.com/anthropics/claude
    ```
    If empty, the plugin is not installed. Go back to Step 0 to check for ghost installation or EXDEV issues. If Step 0 was clean, ask the user to install via `/plugin install claude-hud` first.
 
-2. Get runtime absolute path (prefer bun for performance, fallback to node):
-   ```bash
-   command -v bun 2>/dev/null || command -v node 2>/dev/null
-   ```
+2. Get runtime absolute path:
+   - On `darwin` or `linux`, prefer bun for performance and fall back to node:
+     ```bash
+     command -v bun 2>/dev/null || command -v node 2>/dev/null
+     ```
+   - On `win32` + `bash`, prefer node first and only fall back to bun because Bun is currently unstable for frequent statusLine invocations on Windows:
+     ```bash
+     command -v node 2>/dev/null || command -v bun 2>/dev/null
+     ```
 
    If empty, stop setup and explain that the current shell cannot find `bun` or `node`.
    - On **Windows + Git Bash/MSYS2**, explicitly explain that the current Git Bash session could not find `bun` or `node`, even if Claude Code itself is installed.
@@ -128,7 +133,7 @@ This is a [Claude Code platform limitation](https://github.com/anthropics/claude
      winget install OpenJS.NodeJS.LTS
      ```
    - Otherwise ask the user to install one of these:
-     - Node.js LTS from https://nodejs.org/
+     - Node.js LTS from https://nodejs.org/ (recommended on Windows)
      - Bun from https://bun.sh/
    - After installation, ask the user to restart their shell and re-run `/claude-hud:setup`.
 
@@ -158,7 +163,7 @@ This is a [Claude Code platform limitation](https://github.com/anthropics/claude
 
 **Windows + Git Bash** (Platform: `win32`, Shell: `bash`):
 
-Use the macOS/Linux bash instructions above - same detection commands, same command format. Do not use PowerShell commands when the shell is bash. Claude Code invokes statusLine commands through bash, which will interpret PowerShell variables like `$env` and `$p` before PowerShell ever sees them.
+Use the macOS/Linux bash command format above, but on Windows prefer `node` first and only fall back to `bun`. Do not use PowerShell commands when the shell is bash. Claude Code invokes statusLine commands through bash, which will interpret PowerShell variables like `$env` and `$p` before PowerShell ever sees them.
 
 **Windows + PowerShell** (Platform: `win32`, Shell: `powershell`, `pwsh`, or `cmd`):
 
@@ -169,9 +174,9 @@ Use the macOS/Linux bash instructions above - same detection commands, same comm
    ```
    If empty or errors, the plugin is not installed. Ask the user to install via marketplace first.
 
-2. Get runtime absolute path (prefer bun, fallback to node):
+2. Get runtime absolute path (prefer node, fallback to bun on Windows):
    ```powershell
-   if (Get-Command bun -ErrorAction SilentlyContinue) { (Get-Command bun).Source } elseif (Get-Command node -ErrorAction SilentlyContinue) { (Get-Command node).Source } else { Write-Error "Neither bun nor node found" }
+   if (Get-Command node -ErrorAction SilentlyContinue) { (Get-Command node).Source } elseif (Get-Command bun -ErrorAction SilentlyContinue) { (Get-Command bun).Source } else { Write-Error "Neither node nor bun found" }
    ```
 
    If neither found, stop setup and explain that the current PowerShell session cannot find `bun` or `node`.
@@ -180,6 +185,7 @@ Use the macOS/Linux bash instructions above - same detection commands, same comm
      winget install OpenJS.NodeJS.LTS
      ```
    - Otherwise ask the user to install either Node.js LTS or Bun, then restart PowerShell and re-run `/claude-hud:setup`.
+   - On Windows, prefer Node.js when both are available because Bun is currently unstable for repeated statusLine execution.
 
 3. Check if runtime is bun (by filename). If bun, use `src\index.ts`. Otherwise use `dist\index.js`.
 
@@ -222,6 +228,10 @@ If a write fails with `File has been unexpectedly modified`, re-read the file an
   }
 }
 ```
+
+**JSON safety**: Write `settings.json` with a real JSON serializer or editor API, not manual string concatenation.
+If you must inspect the saved JSON manually, the embedded bash command must preserve escaped backslashes inside the awk fragment.
+For example, the saved JSON should contain `\\$(NF-1)` and `\\$0`, not `\$(NF-1)` and `\$0`.
 
 
 After successfully writing the config, tell the user:
@@ -274,7 +284,7 @@ Use AskUserQuestion:
 - Question: "Setup complete! The HUD should appear below your input field. Is it working?"
 - Options: "Yes, it's working" / "No, something's wrong"
 
-**If yes**: Ask the user if they'd like to ⭐ star the claude-hud repository on GitHub to support the project. If they agree and `gh` CLI is available, run: `gh api -X PUT /user/starred/jarrodwatts/claude-hud`. Only run the star command if they explicitly say yes.
+**If yes**: Ask the user if they'd like to ⭐ star the claude-hud repository on GitHub to support the project. If they agree and `gh` CLI is available, first check whether their `gh` version supports `gh repo star`. If it does, run `gh repo star jarrodwatts/claude-hud`. Otherwise fall back to `gh api -X PUT /user/starred/jarrodwatts/claude-hud`. Only run the star command if they explicitly say yes.
 
 **If no**: Debug systematically:
 
