@@ -24,6 +24,7 @@ type ClaudeBinaryInfo = {
 };
 
 type VersionCacheFile = {
+  resolvedFromPath?: string;
   binaryPath: string;
   binaryMtimeMs: number;
   version: string | null;
@@ -40,7 +41,7 @@ const defaultExecFile: ExecFileImpl = promisify(execFile) as ExecFileImpl;
 let execFileImpl: ExecFileImpl = defaultExecFile;
 let resolveClaudeBinaryImpl: () => ClaudeBinaryInfo | null = resolveClaudeBinaryFromPath;
 let platformImpl: () => NodeJS.Platform = () => process.platform;
-let comspecImpl: () => string | undefined = () => process.env.COMSPEC;
+let windowsCmdImpl: () => string = () => 'C:\\Windows\\System32\\cmd.exe';
 let cachedBinaryKey: string | undefined;
 let cachedVersion: string | undefined;
 let hasResolved = false;
@@ -91,6 +92,8 @@ function readVersionCache(homeDir: string): VersionCacheFile | null {
 
     const parsed = JSON.parse(fs.readFileSync(cachePath, 'utf8')) as VersionCacheFile;
     if (
+      (parsed.resolvedFromPath !== undefined && typeof parsed.resolvedFromPath !== 'string')
+      ||
       typeof parsed.binaryPath !== 'string'
       || typeof parsed.binaryMtimeMs !== 'number'
       || (typeof parsed.version !== 'string' && parsed.version !== null)
@@ -196,13 +199,13 @@ export function _parseClaudeCodeVersion(output: string): string | undefined {
 export function _getClaudeVersionInvocation(
   binaryPath: string,
   platform: NodeJS.Platform = platformImpl(),
-  comspec: string | undefined = comspecImpl()
+  windowsCmd: string = windowsCmdImpl()
 ): ClaudeVersionInvocation {
   const ext = path.extname(binaryPath).toLowerCase();
   if (platform === 'win32' && (ext === '.cmd' || ext === '.bat')) {
     const command = [quoteForCmd(binaryPath), '--version'].join(' ');
     return {
-      file: comspec || 'cmd.exe',
+      file: windowsCmd,
       args: ['/d', '/s', '/c', `"${command}"`],
     };
   }
@@ -218,10 +221,16 @@ export async function getClaudeCodeVersion(): Promise<string | undefined> {
   const diskCache = readVersionCache(homeDir);
   if (diskCache) {
     const cachedBinaryInfo = statResolvedBinary(diskCache.binaryPath);
+    const resolvedBinaryCandidate = resolveClaudeBinaryImpl();
+    const currentResolvedBinary = resolvedBinaryCandidate
+      ? (statResolvedBinary(resolvedBinaryCandidate.path) ?? resolvedBinaryCandidate)
+      : null;
     if (
       cachedBinaryInfo
       && cachedBinaryInfo.path === diskCache.binaryPath
       && cachedBinaryInfo.mtimeMs === diskCache.binaryMtimeMs
+      && currentResolvedBinary
+      && currentResolvedBinary.path === diskCache.binaryPath
     ) {
       const cachedKey = getBinaryCacheKey(cachedBinaryInfo);
       if (hasResolved && cachedBinaryKey === cachedKey) {
@@ -261,6 +270,7 @@ export async function getClaudeCodeVersion(): Promise<string | undefined> {
   }
 
   writeVersionCache(homeDir, {
+    resolvedFromPath: resolvedBinaryInfo.path,
     binaryPath: binaryInfo.path,
     binaryMtimeMs: binaryInfo.mtimeMs,
     version: cachedVersion ?? null,
@@ -287,8 +297,8 @@ export function _setResolveClaudeBinaryForTests(impl: (() => ClaudeBinaryInfo | 
 
 export function _setVersionInvocationEnvForTests(
   platformGetter: (() => NodeJS.Platform) | null,
-  comspecGetter: (() => string | undefined) | null
+  windowsCmdGetter: (() => string) | null
 ): void {
   platformImpl = platformGetter ?? (() => process.platform);
-  comspecImpl = comspecGetter ?? (() => process.env.COMSPEC);
+  windowsCmdImpl = windowsCmdGetter ?? (() => 'C:\\Windows\\System32\\cmd.exe');
 }

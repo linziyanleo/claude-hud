@@ -1,21 +1,27 @@
-import { readStdin, getUsageFromStdin } from './stdin.js';
-import { parseTranscript } from './transcript.js';
-import { render } from './render/index.js';
-import { countConfigs } from './config-reader.js';
-import { getGitStatus } from './git.js';
-import { loadConfig } from './config.js';
-import { parseExtraCmdArg, runExtraCmd } from './extra-cmd.js';
-import { getClaudeCodeVersion } from './version.js';
-import { getMemoryUsage } from './memory.js';
-import { setLanguage, t } from './i18n/index.js';
-import { fetchZenmuxQuota } from './zenmux.js';
-import type { RenderContext } from './types.js';
-import { fileURLToPath } from 'node:url';
-import { realpathSync } from 'node:fs';
+import { readStdin, getUsageFromStdin } from "./stdin.js";
+import { parseTranscript } from "./transcript.js";
+import { render } from "./render/index.js";
+import { countConfigs } from "./config-reader.js";
+import { getGitStatus } from "./git.js";
+import { loadConfig } from "./config.js";
+import { parseExtraCmdArg, runExtraCmd } from "./extra-cmd.js";
+import { getClaudeCodeVersion } from "./version.js";
+import { getMemoryUsage } from "./memory.js";
+import { resolveEffortLevel } from "./effort.js";
+import { applyContextWindowFallback } from "./context-cache.js";
+import { getUsageFromExternalSnapshot } from "./external-usage.js";
+import { fetchZenmuxQuota } from "./zenmux.js";
+import { setLanguage, t } from "./i18n/index.js";
+import type { RenderContext } from "./types.js";
+
+export { getUsageFromExternalSnapshot } from "./external-usage.js";
+import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
 
 export type MainDeps = {
   readStdin: typeof readStdin;
   getUsageFromStdin: typeof getUsageFromStdin;
+  getUsageFromExternalSnapshot: typeof getUsageFromExternalSnapshot;
   parseTranscript: typeof parseTranscript;
   countConfigs: typeof countConfigs;
   getGitStatus: typeof getGitStatus;
@@ -24,6 +30,7 @@ export type MainDeps = {
   runExtraCmd: typeof runExtraCmd;
   getClaudeCodeVersion: typeof getClaudeCodeVersion;
   getMemoryUsage: typeof getMemoryUsage;
+  applyContextWindowFallback: typeof applyContextWindowFallback;
   fetchZenmuxQuota: typeof fetchZenmuxQuota;
   render: typeof render;
   now: () => number;
@@ -34,6 +41,7 @@ export async function main(overrides: Partial<MainDeps> = {}): Promise<void> {
   const deps: MainDeps = {
     readStdin,
     getUsageFromStdin,
+    getUsageFromExternalSnapshot,
     parseTranscript,
     countConfigs,
     getGitStatus,
@@ -42,6 +50,7 @@ export async function main(overrides: Partial<MainDeps> = {}): Promise<void> {
     runExtraCmd,
     getClaudeCodeVersion,
     getMemoryUsage,
+    applyContextWindowFallback,
     fetchZenmuxQuota,
     render,
     now: () => Date.now(),
@@ -67,6 +76,11 @@ export async function main(overrides: Partial<MainDeps> = {}): Promise<void> {
     const transcriptPath = stdin.transcript_path ?? "";
     const transcript = await deps.parseTranscript(transcriptPath);
 
+    deps.applyContextWindowFallback(stdin, {}, transcript.sessionName, {
+      lastCompactBoundaryAt: transcript.lastCompactBoundaryAt,
+      lastCompactPostTokens: transcript.lastCompactPostTokens,
+    });
+
     const { claudeMdCount, rulesCount, mcpCount, hooksCount, outputStyle } =
       await deps.countConfigs(stdin.cwd);
 
@@ -76,10 +90,12 @@ export async function main(overrides: Partial<MainDeps> = {}): Promise<void> {
       ? await deps.getGitStatus(stdin.cwd)
       : null;
 
-    // Usage comes only from Claude Code's official stdin rate_limits fields.
     let usageData: RenderContext["usageData"] = null;
     if (config.display.showUsage !== false) {
       usageData = deps.getUsageFromStdin(stdin);
+      if (!usageData) {
+        usageData = deps.getUsageFromExternalSnapshot(config, deps.now());
+      }
     }
 
     const extraCmd = deps.parseExtraCmdArg();
@@ -92,6 +108,9 @@ export async function main(overrides: Partial<MainDeps> = {}): Promise<void> {
     const claudeCodeVersion = config.display.showClaudeCodeVersion
       ? await deps.getClaudeCodeVersion()
       : undefined;
+    const effortInfo = config.display.showEffortLevel
+      ? resolveEffortLevel(stdin.effort)
+      : null;
     const memoryUsage =
       config.display.showMemoryUsage && config.lineLayout === "expanded"
         ? await deps.getMemoryUsage()
@@ -117,6 +136,8 @@ export async function main(overrides: Partial<MainDeps> = {}): Promise<void> {
       extraLabel,
       outputStyle,
       claudeCodeVersion,
+      effortLevel: effortInfo?.level,
+      effortSymbol: effortInfo?.symbol,
     };
 
     deps.render(ctx);

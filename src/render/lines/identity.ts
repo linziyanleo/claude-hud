@@ -7,11 +7,15 @@ import {
 import { coloredBar, label, getContextColor, RESET } from "../colors.js";
 import { getAdaptiveBarWidth } from "../../utils/terminal.js";
 import { t } from "../../i18n/index.js";
+import { progressLabel } from "./label-align.js";
 
 const DEBUG =
   process.env.DEBUG?.includes("claude-hud") || process.env.DEBUG === "*";
 
-export function renderIdentityLine(ctx: RenderContext): string {
+export function renderIdentityLine(
+  ctx: RenderContext,
+  alignLabels = false,
+): string {
   const rawPercent = getContextPercent(ctx.stdin);
   const bufferedPercent = getBufferedPercent(ctx.stdin);
   const autocompactMode = ctx.config?.display?.autocompactBuffer ?? "enabled";
@@ -25,16 +29,20 @@ export function renderIdentityLine(ctx: RenderContext): string {
   }
 
   const display = ctx.config?.display;
+  const contextThresholds = {
+    warning: display?.contextWarningThreshold,
+    critical: display?.contextCriticalThreshold,
+  };
   const contextValueMode = display?.contextValue ?? "percent";
   const contextValue = formatContextValue(ctx, percent, contextValueMode);
-  const contextValueDisplay = `${getContextColor(percent, colors)}${contextValue}${RESET}`;
+  const contextValueDisplay = `${getContextColor(percent, colors, contextThresholds)}${contextValue}${RESET}`;
 
   let line =
     display?.showContextBar !== false
-      ? `${label(t("label.context"), colors)} ${coloredBar(percent, getAdaptiveBarWidth(), colors)} ${contextValueDisplay}`
-      : `${label(t("label.context"), colors)} ${contextValueDisplay}`;
+      ? `${progressLabel("label.context", colors, alignLabels)} ${coloredBar(percent, getAdaptiveBarWidth(), colors, contextThresholds)} ${contextValueDisplay}`
+      : `${progressLabel("label.context", colors, alignLabels)} ${contextValueDisplay}`;
 
-  if (display?.showTokenBreakdown !== false && percent >= 85) {
+  if (display?.showTokenBreakdown !== false && percent >= (display?.contextCriticalThreshold ?? 85)) {
     const usage = ctx.stdin.context_window?.current_usage;
     if (usage) {
       const input = formatTokens(usage.input_tokens ?? 0);

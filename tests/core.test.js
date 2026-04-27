@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readdir, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { _setCreateReadStreamForTests, parseTranscript } from '../dist/transcript.js';
@@ -191,8 +192,38 @@ test('getBufferedPercent falls back when native is null', () => {
 });
 
 test('native percentage handles zero correctly', () => {
+  // used_percentage: 0 with no tokens → still 0
   assert.equal(getContextPercent({ context_window: { used_percentage: 0 } }), 0);
   assert.equal(getBufferedPercent({ context_window: { used_percentage: 0 } }), 0);
+});
+
+test('getContextPercent falls through to token-based calculation when used_percentage is 0 but tokens exist', () => {
+  // On a fresh session Claude Code emits used_percentage=0 before the first API
+  // response, while current_usage already contains the initial-context tokens
+  // (system prompt, tools, memory files).  The HUD should reflect them.
+  // 18200 / 200000 = 9.1% → rounds to 9%
+  const percent = getContextPercent({
+    context_window: {
+      context_window_size: 200000,
+      current_usage: { input_tokens: 18200 },
+      used_percentage: 0,
+    },
+  });
+  assert.equal(percent, 9);
+});
+
+test('getBufferedPercent falls through to token-based calculation when used_percentage is 0 but tokens exist', () => {
+  // Same fresh-session scenario for the buffered variant.
+  // 18200 / 200000 = 9.1% raw; scale = (0.091 - 0.05) / (0.50 - 0.05) ≈ 0.091
+  // buffer = 200000 * 0.165 * 0.091 ≈ 3003; (18200 + 3003) / 200000 ≈ 10.6% → 11%
+  const percent = getBufferedPercent({
+    context_window: {
+      context_window_size: 200000,
+      current_usage: { input_tokens: 18200 },
+      used_percentage: 0,
+    },
+  });
+  assert.ok(percent > 9, `expected buffered percent > 9, got ${percent}`);
 });
 
 test('native percentage clamps negative values to 0', () => {
@@ -335,7 +366,12 @@ test('bedrock model detection recognizes bedrock ids', () => {
   assert.ok(isBedrockModelId('anthropic.claude-3-5-sonnet-20240620-v1:0'));
   assert.ok(isBedrockModelId('eu.anthropic.claude-opus-4-5-20251101-v1:0'));
   assert.equal(isBedrockModelId('claude-3-5-sonnet-20241022'), false);
-  assert.equal(getProviderLabel({ model: { id: 'anthropic.claude-3-5-sonnet-20240620-v1:0' } }), 'Bedrock');
+  process.env.CLAUDE_CODE_USE_BEDROCK = '1';
+  try {
+    assert.equal(getProviderLabel({ model: { id: 'anthropic.claude-3-5-sonnet-20240620-v1:0' } }), 'Bedrock');
+  } finally {
+    delete process.env.CLAUDE_CODE_USE_BEDROCK;
+  }
   assert.equal(getProviderLabel({ model: { id: 'claude-3-5-sonnet-20241022' } }), null);
 });
 
@@ -376,20 +412,25 @@ test('resolveSessionCost falls back to transcript estimation when native cost is
 });
 
 test('resolveSessionCost ignores native cost for provider-routed sessions', () => {
-  const cost = resolveSessionCost(
-    {
-      model: { id: 'anthropic.claude-sonnet-4-20250514-v1:0' },
-      cost: { total_cost_usd: 0 },
-    },
-    {
-      inputTokens: 100000,
-      cacheCreationTokens: 10000,
-      cacheReadTokens: 20000,
-      outputTokens: 50000,
-    },
-  );
+  process.env.CLAUDE_CODE_USE_BEDROCK = '1';
+  try {
+    const cost = resolveSessionCost(
+      {
+        model: { id: 'anthropic.claude-sonnet-4-20250514-v1:0' },
+        cost: { total_cost_usd: 0 },
+      },
+      {
+        inputTokens: 100000,
+        cacheCreationTokens: 10000,
+        cacheReadTokens: 20000,
+        outputTokens: 50000,
+      },
+    );
 
-  assert.equal(cost, null);
+    assert.equal(cost, null);
+  } finally {
+    delete process.env.CLAUDE_CODE_USE_BEDROCK;
+  }
 });
 
 test('resolveSessionCost falls back when native cost is invalid', () => {
@@ -424,6 +465,31 @@ test('estimateSessionCost still calculates transcript-based Anthropic pricing', 
 
   assert.ok(estimate, 'expected transcript estimate');
   assert.equal(formatUsd(estimate.totalUsd), '$1.09');
+});
+
+test('estimateSessionCost prices Claude Haiku 4.5 (and future 4.x minors)', () => {
+  const tokens = {
+    inputTokens: 1_000_000,
+    cacheCreationTokens: 0,
+    cacheReadTokens: 0,
+    outputTokens: 100_000,
+  };
+
+  const haiku45 = estimateSessionCost({ model: { display_name: 'Claude Haiku 4.5' } }, tokens);
+  assert.ok(haiku45, 'expected non-null estimate for Claude Haiku 4.5');
+  // 1M input @ $1 + 100k output @ $5 = $1 + $0.5 = $1.50
+  assert.equal(formatUsd(haiku45.totalUsd), '$1.50');
+
+  // Bare "Haiku 4" (short name) should also match.
+  const haiku4Bare = estimateSessionCost({ model: { display_name: 'Claude Haiku 4' } }, tokens);
+  assert.ok(haiku4Bare, 'expected non-null estimate for bare Claude Haiku 4');
+  assert.equal(formatUsd(haiku4Bare.totalUsd), '$1.50');
+
+  // Haiku 3.5 pricing stays on its own row.
+  const haiku35 = estimateSessionCost({ model: { display_name: 'Claude Haiku 3.5' } }, tokens);
+  assert.ok(haiku35, 'expected non-null estimate for Claude Haiku 3.5');
+  // 1M input @ $0.8 + 100k output @ $4 = $0.8 + $0.4 = $1.20
+  assert.equal(formatUsd(haiku35.totalUsd), '$1.20');
 });
 
 
@@ -482,6 +548,87 @@ test('parseTranscript accumulates session token usage from assistant messages', 
       cacheCreationTokens: 9000,
       cacheReadTokens: 2000,
     });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('parseTranscript records the most recent compact_boundary and postTokens', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'claude-hud-'));
+  const filePath = path.join(dir, 'compact-boundary.jsonl');
+  const lines = [
+    JSON.stringify({ type: 'assistant', timestamp: '2024-01-01T00:00:01.000Z' }),
+    JSON.stringify({
+      type: 'system',
+      subtype: 'compact_boundary',
+      timestamp: '2024-01-01T00:05:00.000Z',
+      compactMetadata: { trigger: 'auto', preTokens: 170574, postTokens: 7679 },
+    }),
+    JSON.stringify({ type: 'assistant', timestamp: '2024-01-01T00:06:00.000Z' }),
+    // A second /compact later in the session should win.
+    JSON.stringify({
+      type: 'system',
+      subtype: 'compact_boundary',
+      timestamp: '2024-01-01T00:10:00.000Z',
+      compactMetadata: { trigger: 'manual', preTokens: 180000, postTokens: 12345 },
+    }),
+  ];
+
+  await writeFile(filePath, lines.join('\n'), 'utf8');
+
+  try {
+    const result = await parseTranscript(filePath);
+    assert.equal(result.lastCompactBoundaryAt?.toISOString(), '2024-01-01T00:10:00.000Z');
+    assert.equal(result.lastCompactPostTokens, 12345);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('parseTranscript ignores compact_boundary entries without a valid timestamp', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'claude-hud-'));
+  const filePath = path.join(dir, 'compact-boundary-bad.jsonl');
+  const lines = [
+    JSON.stringify({
+      type: 'system',
+      subtype: 'compact_boundary',
+      timestamp: 'not-a-date',
+      compactMetadata: { postTokens: 500 },
+    }),
+    JSON.stringify({
+      type: 'system',
+      subtype: 'something_else',
+      timestamp: '2024-01-01T00:05:00.000Z',
+      compactMetadata: { postTokens: 999 },
+    }),
+  ];
+
+  await writeFile(filePath, lines.join('\n'), 'utf8');
+
+  try {
+    const result = await parseTranscript(filePath);
+    assert.equal(result.lastCompactBoundaryAt, undefined);
+    assert.equal(result.lastCompactPostTokens, undefined);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('parseTranscript captures the last assistant response timestamp', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'claude-hud-'));
+  const filePath = path.join(dir, 'assistant-timestamp.jsonl');
+  const lines = [
+    JSON.stringify({ type: 'assistant', timestamp: '2024-01-01T00:00:05.000Z' }),
+    JSON.stringify({ type: 'user', timestamp: '2024-01-01T00:00:06.000Z' }),
+    JSON.stringify({ type: 'assistant', timestamp: '2024-01-01T00:00:10.000Z' }),
+    JSON.stringify({ type: 'assistant', timestamp: 'not-a-date' }),
+  ];
+
+  await writeFile(filePath, lines.join('\n'), 'utf8');
+
+  try {
+    const result = await parseTranscript(filePath);
+    assert.equal(result.lastAssistantResponseAt?.toISOString(), '2024-01-01T00:00:10.000Z');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -560,6 +707,48 @@ test('TaskCreate taskId is preserved across TodoWrite and usable by TaskUpdate',
     assert.equal(result.todos[0].status, 'completed', 'TaskUpdate via preserved taskId should mark todo completed');
     assert.equal(result.todos[1].content, 'Write tests');
     assert.equal(result.todos[1].status, 'pending');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('TaskCreate taskIds survive TodoWrite when two todos share the same content', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'claude-hud-'));
+  const filePath = path.join(dir, 'taskid-duplicate.jsonl');
+  const lines = [
+    JSON.stringify({
+      timestamp: '2024-01-01T00:00:00.000Z',
+      message: { content: [{ type: 'tool_use', id: 'tc-1', name: 'TaskCreate', input: { taskId: 'a1', subject: 'Duplicate task' } }] },
+    }),
+    JSON.stringify({
+      timestamp: '2024-01-01T00:00:01.000Z',
+      message: { content: [{ type: 'tool_use', id: 'tc-2', name: 'TaskCreate', input: { taskId: 'a2', subject: 'Duplicate task' } }] },
+    }),
+    JSON.stringify({
+      timestamp: '2024-01-01T00:00:02.000Z',
+      message: { content: [{ type: 'tool_use', id: 'tw-1', name: 'TodoWrite', input: { todos: [
+        { content: 'Duplicate task', status: 'pending' },
+        { content: 'Duplicate task', status: 'pending' },
+      ] } }] },
+    }),
+    // Update the SECOND duplicate's taskId specifically.
+    JSON.stringify({
+      timestamp: '2024-01-01T00:00:03.000Z',
+      message: { content: [{ type: 'tool_use', id: 'tu-1', name: 'TaskUpdate', input: { taskId: 'a2', status: 'completed' } }] },
+    }),
+  ];
+
+  await writeFile(filePath, lines.join('\n'), 'utf8');
+
+  try {
+    const result = await parseTranscript(filePath);
+    assert.equal(result.todos.length, 2);
+    assert.equal(result.todos[0].content, 'Duplicate task');
+    assert.equal(result.todos[0].status, 'pending',
+      'first occurrence must remain pending when only the second was updated');
+    assert.equal(result.todos[1].content, 'Duplicate task');
+    assert.equal(result.todos[1].status, 'completed',
+      'second occurrence must be reachable by its own taskId after TodoWrite');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -692,6 +881,57 @@ test('parseTranscript extracts tool targets for common tools', async () => {
   }
 });
 
+test('parseTranscript extracts Skill tool target from non-empty input.skill', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'claude-hud-'));
+  const filePath = path.join(dir, 'skill-target.jsonl');
+  const lines = [
+    JSON.stringify({
+      message: {
+        content: [
+          { type: 'tool_use', id: 'tool-1', name: 'Skill', input: { skill: 'prd-development' } },
+        ],
+      },
+    }),
+  ];
+
+  await writeFile(filePath, lines.join('\n'), 'utf8');
+
+  try {
+    const result = await parseTranscript(filePath);
+    assert.equal(result.tools.length, 1);
+    assert.equal(result.tools[0].name, 'Skill');
+    assert.equal(result.tools[0].target, 'prd-development');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('parseTranscript leaves Skill target empty when input.skill is missing or invalid', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'claude-hud-'));
+  const filePath = path.join(dir, 'skill-target-invalid.jsonl');
+  const lines = [
+    JSON.stringify({
+      message: {
+        content: [
+          { type: 'tool_use', id: 'tool-1', name: 'Skill', input: {} },
+          { type: 'tool_use', id: 'tool-2', name: 'Skill', input: { skill: 123 } },
+          { type: 'tool_use', id: 'tool-3', name: 'Skill', input: { skill: '   ' } },
+        ],
+      },
+    }),
+  ];
+
+  await writeFile(filePath, lines.join('\n'), 'utf8');
+
+  try {
+    const result = await parseTranscript(filePath);
+    assert.equal(result.tools.length, 3);
+    assert.deepEqual(result.tools.map((tool) => tool.target), [undefined, undefined, undefined]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('parseTranscript truncates long bash commands in targets', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'claude-hud-'));
   const filePath = path.join(dir, 'bash.jsonl');
@@ -740,7 +980,7 @@ test('parseTranscript handles edge-case lines and error statuses', async () => {
     const errorTool = result.tools.find((tool) => tool.id === 'tool-error');
     assert.equal(errorTool?.status, 'error');
     assert.equal(errorTool?.target, '/tmp/fallback.txt');
-    assert.equal(result.agents[0]?.type, 'unknown');
+    assert.equal(result.agents[0]?.type, 'agent');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -932,6 +1172,52 @@ test('parseTranscript falls back to a fresh parse when the transcript cache is c
     const second = await parseTranscript(transcriptPath);
     assert.equal(second.tools.length, 1);
     assert.equal(second.tools[0].target, '/tmp/original.txt');
+  } finally {
+    restoreEnvVar('CLAUDE_CONFIG_DIR', originalConfigDir);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('parseTranscript invalidates transcript cache entries from older cache versions', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'claude-hud-transcript-cache-'));
+  const configDir = path.join(dir, '.claude-test');
+  const transcriptPath = path.join(dir, 'cache-version-upgrade.jsonl');
+  const originalConfigDir = process.env.CLAUDE_CONFIG_DIR;
+  const line = `${JSON.stringify({
+    type: 'assistant',
+    timestamp: '2024-01-01T00:00:00.000Z',
+    message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: { path: '/tmp/fresh.txt' } }] },
+  })}\n`;
+
+  process.env.CLAUDE_CONFIG_DIR = configDir;
+  await writeFile(transcriptPath, line, 'utf8');
+  fs.utimesSync(transcriptPath, 1710000200, 1710000200);
+
+  try {
+    const stat = fs.statSync(transcriptPath);
+    const cachePath = path.join(
+      configDir,
+      'plugins',
+      'claude-hud',
+      'transcript-cache',
+      `${createHash('sha256').update(path.resolve(transcriptPath)).digest('hex')}.json`
+    );
+    await mkdir(path.dirname(cachePath), { recursive: true });
+    await writeFile(cachePath, JSON.stringify({
+      transcriptPath: path.resolve(transcriptPath),
+      transcriptState: { mtimeMs: stat.mtimeMs, size: stat.size },
+      data: {
+        tools: [],
+        agents: [],
+        todos: [],
+        sessionName: 'stale-cache',
+      },
+    }), 'utf8');
+
+    const result = await parseTranscript(transcriptPath);
+    assert.equal(result.sessionName, undefined);
+    assert.equal(result.tools.length, 1);
+    assert.equal(result.lastAssistantResponseAt?.toISOString(), '2024-01-01T00:00:00.000Z');
   } finally {
     restoreEnvVar('CLAUDE_CONFIG_DIR', originalConfigDir);
     await rm(dir, { recursive: true, force: true });

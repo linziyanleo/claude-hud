@@ -10,6 +10,7 @@ export interface StdinData {
   };
   context_window?: {
     context_window_size?: number;
+    total_input_tokens?: number | null;
     current_usage?: {
       input_tokens?: number;
       output_tokens?: number;
@@ -37,6 +38,11 @@ export interface StdinData {
       resets_at?: number | null;
     } | null;
   } | null;
+  // Claude Code 2.1.115+ exposes effort as an object: { level: "max" }.
+  // Earlier versions (≤2.1.114) did not send this field at all. The bare-string
+  // shape is kept for backwards compatibility with the original PR #471 design
+  // that future-proofed a string form before Anthropic had committed a schema.
+  effort?: string | { level?: string | null; [key: string]: unknown } | null;
 }
 
 export interface ToolEntry {
@@ -68,6 +74,18 @@ export interface UsageData {
   sevenDay: number | null;  // 0-100 percentage, null if unavailable
   fiveHourResetAt: Date | null;
   sevenDayResetAt: Date | null;
+}
+
+export interface ExternalUsageSnapshot {
+  five_hour?: {
+    used_percentage?: number | null;
+    resets_at?: string | number | null;
+  } | null;
+  seven_day?: {
+    used_percentage?: number | null;
+    resets_at?: string | number | null;
+  } | null;
+  updated_at?: string | number | null;
 }
 
 export interface MemoryInfo {
@@ -109,7 +127,10 @@ export interface TranscriptData {
   todos: TodoItem[];
   sessionStart?: Date;
   sessionName?: string;
+  lastAssistantResponseAt?: Date;
   sessionTokens?: SessionTokenUsage;
+  lastCompactBoundaryAt?: Date;
+  lastCompactPostTokens?: number;
 }
 
 export interface RenderContext {
@@ -128,4 +149,6 @@ export interface RenderContext {
   extraLabel: string | null;
   outputStyle?: string;
   claudeCodeVersion?: string;
+  effortLevel?: string;
+  effortSymbol?: string;
 }
