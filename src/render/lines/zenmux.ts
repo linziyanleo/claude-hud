@@ -23,7 +23,12 @@ function zenmuxBar(percent: number, width: number): string {
   return `${color}${'█'.repeat(filled)}${DIM}${'░'.repeat(empty)}${RESET}`;
 }
 
-export function renderZenmuxLine(ctx: RenderContext): string | null {
+type RenderDensity = 'normal' | 'compact';
+
+export function renderZenmuxLine(
+  ctx: RenderContext,
+  options: { density?: RenderDensity } = {},
+): string | null {
   if (ctx.config?.display?.showZenmuxQuota === false) {
     return null;
   }
@@ -40,12 +45,26 @@ export function renderZenmuxLine(ctx: RenderContext): string | null {
     return `${zmLabel} ${critical(`⚠ Account ${accountStatus}`, colors)}`;
   }
 
+  if (options.density === 'compact') {
+    return `${zmLabel} ${formatCompactQuotaWindowPart('5h', fiveHour)} | ${formatCompactQuotaWindowPart('7d', sevenDay)}`;
+  }
+
   const barWidth = getAdaptiveBarWidth();
 
   const fiveHourPart = formatQuotaWindowPart('5h', fiveHour, colors, barWidth);
   const sevenDayPart = formatQuotaWindowPart('7d', sevenDay, colors, barWidth);
 
   return `${zmLabel} ${fiveHourPart} | ${sevenDayPart}`;
+}
+
+function formatCompactQuotaWindowPart(
+  windowLabel: '5h' | '7d',
+  window: ZenmuxQuotaWindow,
+): string {
+  const pct = window.usagePercentage;
+  const color = getZenmuxColor(pct);
+  const warningPrefix = pct >= 90 ? '⚠ ' : '';
+  return `${windowLabel}: ${color}${warningPrefix}${pct}%${RESET}`;
 }
 
 function formatQuotaWindowPart(
