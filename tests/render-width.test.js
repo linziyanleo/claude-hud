@@ -565,3 +565,157 @@ test('render respects terminal width with Chinese labels enabled', () => {
   assert.ok(lines.some(line => line.includes('用量')), 'should render the translated usage label');
   assert.ok(lines.every(line => displayWidth(line) <= 18), 'all lines should fit terminal width with CJK labels');
 });
+
+// CJK terminals render East Asian Ambiguous chars (█ ░ │ ◐ ✓ etc.) as 2 cells.
+// Without compensating width math, lines that look short to the code overflow
+// the visible terminal and get wrapped by the terminal itself.
+function ambiguousDisplayWidth(text) {
+  let width = 0;
+  for (const char of Array.from(text)) {
+    const cp = char.codePointAt(0);
+    if (cp === undefined) {
+      width += 1;
+      continue;
+    }
+    if (isWideCodePoint(cp)) {
+      width += 2;
+      continue;
+    }
+    const isAmbiguousWide =
+      (cp >= 0x2010 && cp <= 0x2027) ||
+      (cp >= 0x2030 && cp <= 0x205E) ||
+      (cp >= 0x2190 && cp <= 0x21FF) ||
+      (cp >= 0x2200 && cp <= 0x22FF) ||
+      (cp >= 0x2300 && cp <= 0x23FF) ||
+      (cp >= 0x2460 && cp <= 0x24FF) ||
+      (cp >= 0x2500 && cp <= 0x259F) ||
+      (cp >= 0x25A0 && cp <= 0x25FF) ||
+      (cp >= 0x2600 && cp <= 0x26FF) ||
+      (cp >= 0x2700 && cp <= 0x27BF);
+    width += isAmbiguousWide ? 2 : 1;
+  }
+  return width;
+}
+
+test('render wraps the ZenMux line when CJK ambiguous-width bars overflow the terminal', () => {
+  const ctx = baseContext();
+  ctx.config.language = 'zh';
+  ctx.config.lineLayout = 'expanded';
+  ctx.config.elementOrder = ['project', 'zenmux'];
+  ctx.config.display.showZenmuxQuota = true;
+  ctx.config.display.showUsage = false;
+  ctx.config.display.showContextBar = false;
+  ctx.zenmuxQuota = {
+    accountStatus: 'healthy',
+    fiveHour: { usagePercentage: 49, resetsAt: new Date(Date.now() + 3 * 3600 * 1000 + 12 * 60 * 1000) },
+    sevenDay: { usagePercentage: 49, resetsAt: new Date(Date.now() + 24 * 3600 * 1000 + 13 * 60 * 1000) },
+  };
+
+  // At width=70, the rendered ZenMux line is 65 cells in plain ASCII width
+  // but 77 cells when ambiguous box/block chars count as 2. Without the
+  // CJK-aware width math the code thinks 65<=70 and skips wrapping, so the
+  // terminal itself wraps and the visible layout breaks.
+  let cjkLines = [];
+  setLanguage('zh');
+  try {
+    withTerminal(70, () => {
+      cjkLines = captureRender(ctx);
+    });
+  } finally {
+    setLanguage('en');
+  }
+
+  const fiveHourLines = cjkLines.filter(line => line.includes('5h:'));
+  const sevenDayLines = cjkLines.filter(line => line.includes('7d:'));
+  assert.equal(fiveHourLines.length, 1, '5h window should be present');
+  assert.equal(sevenDayLines.length, 1, '7d window should be present');
+  assert.notEqual(
+    fiveHourLines[0],
+    sevenDayLines[0],
+    '5h and 7d should wrap to separate lines under CJK ambiguous-wide measurement',
+  );
+  assert.ok(
+    cjkLines.every(line => ambiguousDisplayWidth(line) <= 70),
+    'no line should overflow 70 cells when ambiguous-width chars count as 2',
+  );
+
+  // Sanity-check: in non-CJK mode the same render fits without wrapping.
+  let enLines = [];
+  withTerminal(70, () => {
+    enLines = captureRender(ctx);
+  });
+  const enZenmux = enLines.filter(line => line.includes('5h:') || line.includes('7d:'));
+  assert.equal(enZenmux.length, 1, 'ZenMux stays on one line at width=70 without CJK measurement');
+});
+
+test('separator width accounts for CJK ambiguous-wide dashes so the terminal does not wrap it', () => {
+  // `─` (U+2500) is East Asian Ambiguous: 1 cell in non-CJK terminals, 2 cells
+  // in CJK terminals. Before the fix, makeSeparator(N) emitted N dashes, which
+  // a CJK terminal renders as 2N cells — pushing the separator past the
+  // terminal width and forcing a hard wrap mid-separator.
+  //
+  // We need a pre-activity line that's wide enough that *2 (the unfixed
+  // separator width) overflows the terminal but the line itself still fits.
+  // A long ZenMux line in CJK mode is ~75 cells; doubled it would be 150.
+  const ctx = baseContext();
+  ctx.config.lineLayout = 'expanded';
+  ctx.config.showSeparators = true;
+  ctx.config.elementOrder = ['project', 'zenmux', 'tools'];
+  ctx.config.display.showContextBar = false;
+  ctx.config.display.showUsage = false;
+  ctx.config.display.showZenmuxQuota = true;
+  ctx.zenmuxQuota = {
+    accountStatus: 'healthy',
+    fiveHour: { usagePercentage: 49, resetsAt: new Date(Date.now() + 3 * 3600 * 1000) },
+    sevenDay: { usagePercentage: 49, resetsAt: new Date(Date.now() + 24 * 3600 * 1000) },
+  };
+  ctx.transcript.tools = [
+    { id: 'tool-1', name: 'Read', status: 'completed', startTime: new Date(0), endTime: new Date(0), duration: 0 },
+  ];
+
+  let cjkLines = [];
+  setLanguage('zh');
+  try {
+    withTerminal(120, () => {
+      cjkLines = captureRender(ctx);
+    });
+  } finally {
+    setLanguage('en');
+  }
+
+  const separatorLines = cjkLines.filter(line => /^[\s─]+$/.test(line));
+  assert.equal(separatorLines.length, 1, 'separator should render exactly once and not be split into multiple lines');
+  assert.ok(
+    ambiguousDisplayWidth(separatorLines[0]) <= 120,
+    `separator visual width must fit terminal in CJK mode (got ${ambiguousDisplayWidth(separatorLines[0])} cells, terminal=120)`,
+  );
+
+  for (const line of cjkLines) {
+    assert.ok(
+      ambiguousDisplayWidth(line) <= 120,
+      `line "${line}" exceeds 120 cells in CJK mode (got ${ambiguousDisplayWidth(line)})`,
+    );
+  }
+});
+
+
+test('width math counts ambiguous chars as 2 cells only in CJK mode', async () => {
+  const { codePointCellWidth, isAmbiguousWideCodePoint, isCjkAmbiguousWide } =
+    await import('../dist/render/width.js');
+
+  assert.equal(isAmbiguousWideCodePoint(0x2588), true, '█ U+2588 is ambiguous');
+  assert.equal(isAmbiguousWideCodePoint(0x2502), true, '│ U+2502 is ambiguous');
+  assert.equal(isAmbiguousWideCodePoint(0x0041), false, 'ASCII A is not ambiguous');
+
+  setLanguage('zh');
+  try {
+    assert.equal(isCjkAmbiguousWide(), true);
+    assert.equal(codePointCellWidth(0x2588, isCjkAmbiguousWide()), 2);
+    assert.equal(codePointCellWidth(0x0041, isCjkAmbiguousWide()), 1);
+  } finally {
+    setLanguage('en');
+  }
+
+  assert.equal(isCjkAmbiguousWide(), false);
+  assert.equal(codePointCellWidth(0x2588, isCjkAmbiguousWide()), 1);
+});
