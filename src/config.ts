@@ -8,6 +8,7 @@ export type LineLayoutType = 'compact' | 'expanded';
 
 export type AutocompactBufferMode = 'enabled' | 'disabled';
 export type ContextValueMode = 'percent' | 'tokens' | 'remaining' | 'both';
+export type UsageValueMode = 'percent' | 'remaining';
 export type GitBranchOverflowMode = 'truncate' | 'wrap';
 
 /**
@@ -21,6 +22,7 @@ export type ModelFormatMode = 'full' | 'compact' | 'short';
 export type TimeFormatMode = 'relative' | 'absolute' | 'both';
 export type HudElement =
   | 'project'
+  | 'addedDirs'
   | 'context'
   | 'usage'
   | 'promptCache'
@@ -29,7 +31,10 @@ export type HudElement =
   | 'tools'
   | 'agents'
   | 'todos'
+  | 'sessionTime'
   | 'zenmux';
+
+export type AddedDirsLayout = 'inline' | 'line';
 export type HudColorName =
   | 'dim'
   | 'red'
@@ -55,10 +60,13 @@ export interface HudColorOverrides {
   gitBranch: HudColorValue;
   label: HudColorValue;
   custom: HudColorValue;
+  barFilled: string;
+  barEmpty: string;
 }
 
 export const DEFAULT_ELEMENT_ORDER: HudElement[] = [
   'project',
+  'addedDirs',
   'context',
   'usage',
   'zenmux',
@@ -68,6 +76,7 @@ export const DEFAULT_ELEMENT_ORDER: HudElement[] = [
   'tools',
   'agents',
   'todos',
+  'sessionTime',
 ];
 
 // All progress/info elements share one merge group so the renderer can
@@ -89,6 +98,7 @@ export interface HudConfig {
   showSeparators: boolean;
   pathLevels: 1 | 2 | 3;
   maxWidth: number | null;
+  forceMaxWidth: boolean;
   elementOrder: HudElement[];
   gitStatus: {
     enabled: boolean;
@@ -102,6 +112,8 @@ export interface HudConfig {
   display: {
     showModel: boolean;
     showProject: boolean;
+    showAddedDirs: boolean;
+    addedDirsLayout: AddedDirsLayout;
     showContextBar: boolean;
     contextValue: ContextValueMode;
     showConfigCounts: boolean;
@@ -110,6 +122,7 @@ export interface HudConfig {
     showSpeed: boolean;
     showTokenBreakdown: boolean;
     showUsage: boolean;
+    usageValue: UsageValueMode;
     usageBarEnabled: boolean;
     showResetLabel: boolean;
     usageCompact: boolean;
@@ -126,6 +139,8 @@ export interface HudConfig {
     promptCacheTtlSeconds: number;
     showSessionTokens: boolean;
     showOutputStyle: boolean;
+    showSessionStartDate: boolean;
+    showLastResponseAt: boolean;
     mergeGroups: HudElement[][];
     autocompactBuffer: AutocompactBufferMode;
     contextWarningThreshold: number;
@@ -149,6 +164,7 @@ export const DEFAULT_CONFIG: HudConfig = {
   showSeparators: false,
   pathLevels: 1,
   maxWidth: null,
+  forceMaxWidth: false,
   elementOrder: [...DEFAULT_ELEMENT_ORDER],
   gitStatus: {
     enabled: true,
@@ -162,6 +178,8 @@ export const DEFAULT_CONFIG: HudConfig = {
   display: {
     showModel: true,
     showProject: true,
+    showAddedDirs: true,
+    addedDirsLayout: 'inline',
     showContextBar: true,
     contextValue: 'percent',
     showConfigCounts: false,
@@ -170,6 +188,7 @@ export const DEFAULT_CONFIG: HudConfig = {
     showSpeed: false,
     showTokenBreakdown: true,
     showUsage: true,
+    usageValue: 'percent',
     usageBarEnabled: true,
     showResetLabel: true,
     usageCompact: false,
@@ -186,6 +205,8 @@ export const DEFAULT_CONFIG: HudConfig = {
     promptCacheTtlSeconds: 300,
     showSessionTokens: false,
     showOutputStyle: false,
+    showSessionStartDate: false,
+    showLastResponseAt: false,
     mergeGroups: DEFAULT_MERGE_GROUPS.map(group => [...group]),
     autocompactBuffer: 'enabled',
     contextWarningThreshold: 70,
@@ -212,6 +233,8 @@ export const DEFAULT_CONFIG: HudConfig = {
     gitBranch: 'cyan',
     label: 'dim',
     custom: 208,
+    barFilled: '█',
+    barEmpty: '░',
   },
 };
 
@@ -240,6 +263,10 @@ function validateContextValue(value: unknown): value is ContextValueMode {
   return value === 'percent' || value === 'tokens' || value === 'remaining' || value === 'both';
 }
 
+function validateUsageValue(value: unknown): value is UsageValueMode {
+  return value === 'percent' || value === 'remaining';
+}
+
 function validateLanguage(value: unknown): value is Language {
   return value === 'en' || value === 'zh';
 }
@@ -261,6 +288,20 @@ function validateColorName(value: unknown): value is HudColorName {
     || value === 'cyan'
     || value === 'brightBlue'
     || value === 'brightMagenta';
+}
+
+const UNSAFE_CODEPOINT = /[\p{Cc}\p{Cf}\p{Variation_Selector}\p{Zl}\p{Zp}\p{Cn}]/u;
+
+function validateBarChar(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length === 0) return false;
+
+  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+  if (Array.from(segmenter.segment(value)).length !== 1) return false;
+
+  for (const ch of value) {
+    if (UNSAFE_CODEPOINT.test(ch)) return false;
+  }
+  return true;
 }
 
 const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
@@ -435,6 +476,9 @@ export function mergeConfig(userConfig: Partial<HudConfig>): HudConfig {
     : null;
 
   const elementOrder = validateElementOrder(migrated.elementOrder);
+  const forceMaxWidth = typeof (migrated as Record<string, unknown>).forceMaxWidth === 'boolean'
+    ? (migrated as Record<string, unknown>).forceMaxWidth as boolean
+    : DEFAULT_CONFIG.forceMaxWidth;
 
   const gitStatus = {
     enabled: typeof migrated.gitStatus?.enabled === 'boolean'
@@ -463,6 +507,12 @@ export function mergeConfig(userConfig: Partial<HudConfig>): HudConfig {
     showProject: typeof migrated.display?.showProject === 'boolean'
       ? migrated.display.showProject
       : DEFAULT_CONFIG.display.showProject,
+    showAddedDirs: typeof migrated.display?.showAddedDirs === 'boolean'
+      ? migrated.display.showAddedDirs
+      : DEFAULT_CONFIG.display.showAddedDirs,
+    addedDirsLayout: (migrated.display?.addedDirsLayout === 'inline' || migrated.display?.addedDirsLayout === 'line')
+      ? migrated.display.addedDirsLayout
+      : DEFAULT_CONFIG.display.addedDirsLayout,
     showContextBar: typeof migrated.display?.showContextBar === 'boolean'
       ? migrated.display.showContextBar
       : DEFAULT_CONFIG.display.showContextBar,
@@ -487,6 +537,9 @@ export function mergeConfig(userConfig: Partial<HudConfig>): HudConfig {
     showUsage: typeof migrated.display?.showUsage === 'boolean'
       ? migrated.display.showUsage
       : DEFAULT_CONFIG.display.showUsage,
+    usageValue: validateUsageValue(migrated.display?.usageValue)
+      ? migrated.display.usageValue
+      : DEFAULT_CONFIG.display.usageValue,
     usageBarEnabled: typeof migrated.display?.usageBarEnabled === 'boolean'
       ? migrated.display.usageBarEnabled
       : DEFAULT_CONFIG.display.usageBarEnabled,
@@ -538,6 +591,12 @@ export function mergeConfig(userConfig: Partial<HudConfig>): HudConfig {
     showOutputStyle: typeof migrated.display?.showOutputStyle === 'boolean'
       ? migrated.display.showOutputStyle
       : DEFAULT_CONFIG.display.showOutputStyle,
+    showSessionStartDate: typeof migrated.display?.showSessionStartDate === 'boolean'
+      ? migrated.display.showSessionStartDate
+      : DEFAULT_CONFIG.display.showSessionStartDate,
+    showLastResponseAt: typeof migrated.display?.showLastResponseAt === 'boolean'
+      ? migrated.display.showLastResponseAt
+      : DEFAULT_CONFIG.display.showLastResponseAt,
     mergeGroups: validateMergeGroups(migrated.display?.mergeGroups),
     autocompactBuffer: validateAutocompactBuffer(migrated.display?.autocompactBuffer)
       ? migrated.display.autocompactBuffer
@@ -603,9 +662,15 @@ export function mergeConfig(userConfig: Partial<HudConfig>): HudConfig {
     custom: validateColorValue(migrated.colors?.custom)
       ? migrated.colors.custom
       : DEFAULT_CONFIG.colors.custom,
+    barFilled: validateBarChar(migrated.colors?.barFilled)
+      ? migrated.colors.barFilled
+      : DEFAULT_CONFIG.colors.barFilled,
+    barEmpty: validateBarChar(migrated.colors?.barEmpty)
+      ? migrated.colors.barEmpty
+      : DEFAULT_CONFIG.colors.barEmpty,
   };
 
-  return { language, lineLayout, showSeparators, pathLevels, maxWidth, elementOrder, gitStatus, display, colors };
+  return { language, lineLayout, showSeparators, pathLevels, maxWidth, forceMaxWidth, elementOrder, gitStatus, display, colors };
 }
 
 export async function loadConfig(): Promise<HudConfig> {

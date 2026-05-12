@@ -8,6 +8,7 @@ import { renderTodosLine } from './todos-line.js';
 import {
   renderIdentityLine,
   renderProjectLine,
+  renderAddedDirsLine,
   renderGitFilesLine,
   renderEnvironmentLine,
   renderPromptCacheLine,
@@ -15,6 +16,7 @@ import {
   renderMemoryLine,
   renderZenmuxLine,
   renderSessionTokensLine,
+  renderSessionTimeLine,
 } from './lines/index.js';
 import { dim, RESET } from './colors.js';
 import { getTerminalWidth, UNKNOWN_TERMINAL_WIDTH } from '../utils/terminal.js';
@@ -392,6 +394,8 @@ function renderElementLine(
   switch (element) {
     case 'project':
       return renderProjectLine(ctx);
+    case 'addedDirs':
+      return renderAddedDirsLine(ctx);
     case 'context':
       return renderIdentityLine(ctx, alignProgressLabels);
     case 'usage':
@@ -410,6 +414,8 @@ function renderElementLine(
       return display?.showTodos === false ? null : renderTodosLine(ctx);
     case 'zenmux':
       return display?.showZenmuxQuota === false ? null : renderZenmuxLine(ctx, { density });
+    case 'sessionTime':
+      return renderSessionTimeLine(ctx);
   }
 }
 
@@ -586,7 +592,10 @@ export function render(ctx: RenderContext): void {
   const showSeparators = ctx.config?.showSeparators ?? false;
   const stdinWidth = parseColumns(ctx.stdin?.columns);
   const detectedWidth = getTerminalWidth({ preferEnv: true, fallback: UNKNOWN_TERMINAL_WIDTH });
-  const terminalWidth = stdinWidth ?? detectedWidth ?? ctx.config?.maxWidth ?? FALLBACK_TERMINAL_WIDTH;
+  const configuredMaxWidth = ctx.config?.maxWidth ?? UNKNOWN_TERMINAL_WIDTH;
+  const terminalWidth = ctx.config?.forceMaxWidth && configuredMaxWidth !== UNKNOWN_TERMINAL_WIDTH
+    ? configuredMaxWidth
+    : (stdinWidth ?? detectedWidth ?? configuredMaxWidth ?? FALLBACK_TERMINAL_WIDTH);
 
   withRenderColumns(terminalWidth, () => {
     let lines: string[];
