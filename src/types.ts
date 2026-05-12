@@ -122,6 +122,14 @@ export interface ZenmuxQuotaData {
   accountStatus: string;
 }
 
+export interface IdealabQuotaData {
+  todayAmountCost: number;
+  dailyAmountLimit: number;
+  todayUsedCount: number;
+  dailyCallLimit: number;
+  authError: boolean;
+}
+
 export interface SessionTokenUsage {
   inputTokens: number;
   outputTokens: number;
@@ -153,6 +161,7 @@ export interface RenderContext {
   usageData: UsageData | null;
   memoryUsage: MemoryInfo | null;
   zenmuxQuota: ZenmuxQuotaData | null;
+  idealabQuota: IdealabQuotaData | null;
   config: HudConfig;
   extraLabel: string | null;
   outputStyle?: string;

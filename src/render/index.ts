@@ -15,6 +15,7 @@ import {
   renderUsageLine,
   renderMemoryLine,
   renderZenmuxLine,
+  renderIdealabLine,
   renderSessionTokensLine,
   renderSessionTimeLine,
 } from './lines/index.js';
@@ -414,6 +415,8 @@ function renderElementLine(
       return display?.showTodos === false ? null : renderTodosLine(ctx);
     case 'zenmux':
       return display?.showZenmuxQuota === false ? null : renderZenmuxLine(ctx, { density });
+    case 'idealab':
+      return display?.showIdealabQuota === false ? null : renderIdealabLine(ctx);
     case 'sessionTime':
       return renderSessionTimeLine(ctx);
   }

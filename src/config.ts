@@ -32,7 +32,8 @@ export type HudElement =
   | 'agents'
   | 'todos'
   | 'sessionTime'
-  | 'zenmux';
+  | 'zenmux'
+  | 'idealab';
 
 export type AddedDirsLayout = 'inline' | 'line';
 export type HudColorName =
@@ -70,6 +71,7 @@ export const DEFAULT_ELEMENT_ORDER: HudElement[] = [
   'context',
   'usage',
   'zenmux',
+  'idealab',
   'promptCache',
   'memory',
   'environment',
@@ -87,7 +89,7 @@ export const DEFAULT_ELEMENT_ORDER: HudElement[] = [
 // is required: collectMergeSequence stops at the first consecutive
 // element that isn't in the group.
 export const DEFAULT_MERGE_GROUPS: HudElement[][] = [
-  ['context', 'usage', 'zenmux', 'promptCache', 'memory', 'environment'],
+  ['context', 'usage', 'zenmux', 'idealab', 'promptCache', 'memory', 'environment'],
 ];
 
 const KNOWN_ELEMENTS = new Set<HudElement>(DEFAULT_ELEMENT_ORDER);
@@ -135,6 +137,9 @@ export interface HudConfig {
     showMemoryUsage: boolean;
     showZenmuxQuota: boolean;
     zenmuxCacheTtlMs: number;
+    showIdealabQuota: boolean;
+    idealabCacheTtlMs: number;
+    idealabTeamCode: string;
     showPromptCache: boolean;
     promptCacheTtlSeconds: number;
     showSessionTokens: boolean;
@@ -201,6 +206,9 @@ export const DEFAULT_CONFIG: HudConfig = {
     showMemoryUsage: false,
     showZenmuxQuota: false,
     zenmuxCacheTtlMs: 1000,
+    showIdealabQuota: false,
+    idealabCacheTtlMs: 60_000,
+    idealabTeamCode: 'API_TEAM_CODE_99',
     showPromptCache: false,
     promptCacheTtlSeconds: 300,
     showSessionTokens: false,
@@ -578,6 +586,18 @@ export function mergeConfig(userConfig: Partial<HudConfig>): HudConfig {
       && migrated.display.zenmuxCacheTtlMs >= 0
       ? migrated.display.zenmuxCacheTtlMs
       : DEFAULT_CONFIG.display.zenmuxCacheTtlMs,
+    showIdealabQuota: typeof migrated.display?.showIdealabQuota === 'boolean'
+      ? migrated.display.showIdealabQuota
+      : DEFAULT_CONFIG.display.showIdealabQuota,
+    idealabCacheTtlMs: typeof migrated.display?.idealabCacheTtlMs === 'number'
+      && Number.isFinite(migrated.display.idealabCacheTtlMs)
+      && migrated.display.idealabCacheTtlMs >= 0
+      ? migrated.display.idealabCacheTtlMs
+      : DEFAULT_CONFIG.display.idealabCacheTtlMs,
+    idealabTeamCode: typeof migrated.display?.idealabTeamCode === 'string'
+      && migrated.display.idealabTeamCode.length > 0
+      ? migrated.display.idealabTeamCode
+      : DEFAULT_CONFIG.display.idealabTeamCode,
     showPromptCache: typeof migrated.display?.showPromptCache === 'boolean'
       ? migrated.display.showPromptCache
       : DEFAULT_CONFIG.display.showPromptCache,

@@ -11,6 +11,7 @@ import { resolveEffortLevel } from "./effort.js";
 import { applyContextWindowFallback } from "./context-cache.js";
 import { getUsageFromExternalSnapshot } from "./external-usage.js";
 import { fetchZenmuxQuota } from "./zenmux.js";
+import { fetchIdealabQuota } from "./idealab.js";
 import { setLanguage, t } from "./i18n/index.js";
 import type { RenderContext } from "./types.js";
 
@@ -32,6 +33,7 @@ export type MainDeps = {
   getMemoryUsage: typeof getMemoryUsage;
   applyContextWindowFallback: typeof applyContextWindowFallback;
   fetchZenmuxQuota: typeof fetchZenmuxQuota;
+  fetchIdealabQuota: typeof fetchIdealabQuota;
   render: typeof render;
   now: () => number;
   log: (...args: unknown[]) => void;
@@ -52,6 +54,7 @@ export async function main(overrides: Partial<MainDeps> = {}): Promise<void> {
     getMemoryUsage,
     applyContextWindowFallback,
     fetchZenmuxQuota,
+    fetchIdealabQuota,
     render,
     now: () => Date.now(),
     log: console.log,
@@ -120,6 +123,13 @@ export async function main(overrides: Partial<MainDeps> = {}): Promise<void> {
       ? await deps.fetchZenmuxQuota(config.display.zenmuxCacheTtlMs)
       : null;
 
+    const idealabQuota = config.display.showIdealabQuota
+      ? await deps.fetchIdealabQuota({
+          cacheTtlMs: config.display.idealabCacheTtlMs,
+          teamCode: config.display.idealabTeamCode,
+        })
+      : null;
+
     const ctx: RenderContext = {
       stdin,
       transcript,
@@ -132,6 +142,7 @@ export async function main(overrides: Partial<MainDeps> = {}): Promise<void> {
       usageData,
       memoryUsage,
       zenmuxQuota,
+      idealabQuota,
       config,
       extraLabel,
       outputStyle,
